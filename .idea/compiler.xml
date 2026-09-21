@@ -12,7 +12,7 @@
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
-      <module name="PRM_Marketplace" options="-parameters" />
+      <module name="PRM_Marketplace" options="-parameters --add-exports java.desktop/com.sun.imageio.plugins.jpeg=ALL-UNNAMED" />
     </option>
   </component>
 </project>
