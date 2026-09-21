@@ -26,6 +26,14 @@ public class CartItemController {
         return new ResponseEntity<>(created, HttpStatus.CREATED);
     }
 
+    @PostMapping("/add")
+    public ResponseEntity<CartItem> addToCart(@RequestParam UUID userId,
+                                              @RequestParam UUID productId,
+                                              @RequestParam int quantity) {
+        CartItem created = cartItemService.addToCart(userId, productId, quantity);
+        return new ResponseEntity<>(created, HttpStatus.CREATED);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<CartItem> read(@PathVariable UUID id) {
         CartItem cartItem = cartItemService.read(id);
@@ -66,14 +74,18 @@ public class CartItemController {
         return ResponseEntity.ok(cartItemService.getByUser(userId));
     }
 
-    @PatchMapping("/{id}/quantity")
+    @PutMapping("/{id}/quantity")
     public ResponseEntity<CartItem> updateQuantity(@PathVariable UUID id, @RequestParam int quantity) {
-        CartItem existing = cartItemService.read(id);
-        if (existing == null) {
-            return ResponseEntity.notFound().build();
+        CartItem updated = cartItemService.updateQuantity(id, quantity);
+        if (updated == null) {
+            return ResponseEntity.noContent().build();
         }
-        CartItem toUpdate = CartItem.builder().copy(existing).quantity(quantity).build();
-        CartItem updated = cartItemService.update(toUpdate);
         return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/user/{userId}")
+    public ResponseEntity<Void> clearCart(@PathVariable UUID userId) {
+        cartItemService.clearCart(userId);
+        return ResponseEntity.noContent().build();
     }
 }

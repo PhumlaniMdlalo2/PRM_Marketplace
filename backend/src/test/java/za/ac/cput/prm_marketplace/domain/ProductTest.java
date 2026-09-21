@@ -6,19 +6,18 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.UUID;
 
-import static com.sun.imageio.plugins.jpeg.JPEG.vendor;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProductTest {
 
     private UUID id;
-    private UUID vendorId;
+    private VendorProfile vendor;
     private Product product;
 
     @BeforeEach
     void setUp(){
         id = UUID.randomUUID();
-        VendorProfile vendor = new VendorProfile();
+        vendor = new VendorProfile();
 
         product = new Product.Builder()
                 .id(id)

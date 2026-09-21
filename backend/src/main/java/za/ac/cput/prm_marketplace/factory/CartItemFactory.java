@@ -15,7 +15,7 @@ public class CartItemFactory {
         if (product == null)
             throw new IllegalArgumentException("Product is required");
         if (quantity <= 0)
-            throw new IllegalArgumentException("Quantity must be atleast 1");
+            throw new IllegalArgumentException("Quantity must be at least 1");
 
         return new CartItem.Builder()
                 .user(user)
