@@ -68,4 +68,7 @@ public class ReportController {
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
+
+    public static class PaymentController {
+    }
 }
