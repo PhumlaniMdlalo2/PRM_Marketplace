@@ -1,6 +1,8 @@
 package za.ac.cput.prm_marketplace.service;
 
 import za.ac.cput.prm_marketplace.domain.Report;
+import za.ac.cput.prm_marketplace.domain.ReportStatus;
+import za.ac.cput.prm_marketplace.domain.ReportTargetType;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.repository.ReportRepository;
@@ -41,9 +43,9 @@ class ReportServiceImplTest {
         return new Report.Builder()
                 .setId(id)
                 .setReporter(buildUser())
-                .setTargetType("PRODUCT")
+                .setTargetType(ReportTargetType.PRODUCT)
                 .setReason("Counterfeit")
-                .setStatus("OPEN")
+                .setStatus(ReportStatus.OPEN)
                 .build();
     }
 

@@ -1,8 +1,11 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -32,8 +35,13 @@ public class User {
 
     private boolean verified;
 
+    private String avatarUrl;
+
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL)
     private VendorProfile vendorProfile;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Address> addresses = new ArrayList<>();
 
     protected User() {
 
@@ -48,6 +56,7 @@ public class User {
         this.phone = builder.phone;
         this.createdAt = builder.createdAt;
         this.verified = builder.verified;
+        this.avatarUrl = builder.avatarUrl;
         this.vendorProfile = builder.vendorProfile;
     }
 
@@ -63,6 +72,7 @@ public class User {
         return email;
     }
 
+    @JsonIgnore
     public String getPasswordHash() {
         return passwordHash;
     }
@@ -85,6 +95,39 @@ public class User {
 
     public VendorProfile getVendorProfile() {
         return vendorProfile;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public List<Address> getAddresses() {
+        return addresses;
+    }
+
+    public void addAddress(Address address) {
+        addresses.add(address);
+        address.setUser(this);
+    }
+
+    public void removeAddress(Address address) {
+        addresses.remove(address);
+        address.setUser(null);
+    }
+
+    public void setVerified(boolean verified) {
+        this.verified = verified;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public Address getDefaultAddress() {
+        return addresses.stream()
+                .filter(Address::isDefaultAddress)
+                .findFirst()
+                .orElse(null);
     }
 
     @Override
@@ -111,6 +154,7 @@ public class User {
         private String phone;
         private LocalDateTime createdAt;
         private boolean verified;
+        private String avatarUrl;
         private VendorProfile vendorProfile;
 
         public Builder setId(UUID id) {
@@ -153,6 +197,11 @@ public class User {
             return this;
         }
 
+        public Builder setAvatarUrl(String avatarUrl) {
+            this.avatarUrl = avatarUrl;
+            return this;
+        }
+
         public Builder setVendorProfile(VendorProfile vendorProfile) {
             this.vendorProfile = vendorProfile;
             return this;
@@ -167,6 +216,7 @@ public class User {
             this.phone = user.phone;
             this.createdAt = user.createdAt;
             this.verified = user.verified;
+            this.avatarUrl = user.avatarUrl;
             this.vendorProfile = user.vendorProfile;
             return this;
         }

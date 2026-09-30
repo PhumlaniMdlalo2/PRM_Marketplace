@@ -1,12 +1,15 @@
 package za.ac.cput.prm_marketplace.controller;
 
 import za.ac.cput.prm_marketplace.domain.Report;
+import za.ac.cput.prm_marketplace.domain.ReportStatus;
+import za.ac.cput.prm_marketplace.domain.ReportTargetType;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.service.IReportService;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -21,6 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(ReportController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class ReportControllerTest {
 
     @Autowired
@@ -46,9 +50,9 @@ class ReportControllerTest {
         return new Report.Builder()
                 .setId(id)
                 .setReporter(buildUser())
-                .setTargetType("PRODUCT")
+                .setTargetType(ReportTargetType.PRODUCT)
                 .setReason("Counterfeit")
-                .setStatus("OPEN")
+                .setStatus(ReportStatus.OPEN)
                 .build();
     }
 

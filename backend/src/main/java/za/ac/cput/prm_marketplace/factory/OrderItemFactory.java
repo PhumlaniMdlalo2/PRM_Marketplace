@@ -1,20 +1,21 @@
 package za.ac.cput.prm_marketplace.factory;
 
+import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
+import za.ac.cput.prm_marketplace.domain.Product;
 
 import java.math.BigDecimal;
-import java.util.UUID;
 
 public class OrderItemFactory {
 
-    public static OrderItem createOrderItem(UUID orderId, UUID productId,
-                                            int quantity, BigDecimal priceAtPurchase) {
+    public static OrderItem createOrderItem(Order order, Product product,
+                                             int quantity, BigDecimal priceAtPurchase) {
 
-        if (orderId == null) {
+        if (order == null) {
             return null;
         }
 
-        if (productId == null) {
+        if (product == null) {
             return null;
         }
 
@@ -28,10 +29,17 @@ public class OrderItemFactory {
         }
 
         return new OrderItem.Builder()
-                .setOrderId(orderId)
-                .setProductId(productId)
+                .setOrder(order)
+                .setProduct(product)
                 .setQuantity(quantity)
                 .setPriceAtPurchase(priceAtPurchase)
                 .build();
+    }
+
+    public static OrderItem createOrderItemForProduct(Order order, Product product, int quantity) {
+        if (product == null) {
+            return null;
+        }
+        return createOrderItem(order, product, quantity, product.getPrice());
     }
 }

@@ -1,6 +1,7 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -16,6 +17,7 @@ public class VendorProfile {
 
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private User user;
 
     @Column(nullable = false)

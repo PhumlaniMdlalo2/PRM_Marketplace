@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -30,6 +32,14 @@ public class Product {
 
     private String imageUrl;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "product_condition")
+    private ProductCondition condition;
+
+    private String city;
+
+    private String province;
+
     @ManyToOne
     @JoinColumn(name = "vendor_id", nullable = false)
     private VendorProfile vendor;
@@ -38,6 +48,10 @@ public class Product {
     private LocalDateTime createdAt;
 
     private boolean active;
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC")
+    private List<ProductImage> images = new ArrayList<>();
 
     protected Product() {
         // required by JPA
@@ -51,6 +65,9 @@ public class Product {
         this.stockQuantity = builder.stockQuantity;
         this.category = builder.category;
         this.imageUrl = builder.imageUrl;
+        this.condition = builder.condition;
+        this.city = builder.city;
+        this.province = builder.province;
         this.vendor = builder.vendor;
         this.createdAt = builder.createdAt;
         this.active = builder.active;
@@ -82,6 +99,32 @@ public class Product {
 
     public String getImageUrl() {
         return imageUrl;
+    }
+
+    public ProductCondition getCondition() {
+        return condition;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public String getProvince() {
+        return province;
+    }
+
+    public List<ProductImage> getImages() {
+        return images;
+    }
+
+    public void addImage(ProductImage image) {
+        images.add(image);
+        image.setProduct(this);
+    }
+
+    public void removeImage(ProductImage image) {
+        images.remove(image);
+        image.setProduct(null);
     }
 
     public VendorProfile getVendor() {
@@ -124,6 +167,9 @@ public class Product {
                 ", stockQuantity=" + stockQuantity +
                 ", category='" + category + '\'' +
                 ", imageUrl='" + imageUrl + '\'' +
+                ", condition=" + condition +
+                ", city='" + city + '\'' +
+                ", province='" + province + '\'' +
                 ", vendor=" + vendor +
                 ", createdAt=" + createdAt +
                 ", active=" + active +
@@ -142,6 +188,9 @@ public class Product {
         private int stockQuantity;
         private String category;
         private String imageUrl;
+        private ProductCondition condition;
+        private String city;
+        private String province;
         private VendorProfile vendor;
         private LocalDateTime createdAt;
         private boolean active = true;
@@ -181,6 +230,21 @@ public class Product {
             return this;
         }
 
+        public Builder condition(ProductCondition condition) {
+            this.condition = condition;
+            return this;
+        }
+
+        public Builder city(String city) {
+            this.city = city;
+            return this;
+        }
+
+        public Builder province(String province) {
+            this.province = province;
+            return this;
+        }
+
         public Builder vendor(VendorProfile vendor) {
             this.vendor = vendor;
             return this;
@@ -204,6 +268,9 @@ public class Product {
             this.stockQuantity = product.stockQuantity;
             this.category = product.category;
             this.imageUrl = product.imageUrl;
+            this.condition = product.condition;
+            this.city = product.city;
+            this.province = product.province;
             this.vendor = product.vendor;
             this.createdAt = product.createdAt;
             this.active = product.active;

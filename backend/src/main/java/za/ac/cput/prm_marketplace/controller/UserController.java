@@ -1,6 +1,8 @@
 package za.ac.cput.prm_marketplace.controller;
 
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.dto.UserResponse;
+import za.ac.cput.prm_marketplace.mapper.UserMapper;
 import za.ac.cput.prm_marketplace.service.IUserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,30 +22,30 @@ public class UserController {
     }
 
     @PostMapping
-    public ResponseEntity<User> create(@RequestBody User user) {
+    public ResponseEntity<UserResponse> create(@RequestBody User user) {
         User created = userService.create(user);
         if (created == null) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+        return ResponseEntity.status(HttpStatus.CREATED).body(UserMapper.toResponse(created));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<User> read(@PathVariable UUID id) {
+    public ResponseEntity<UserResponse> read(@PathVariable UUID id) {
         User user = userService.read(id);
         if (user == null) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(user);
+        return ResponseEntity.ok(UserMapper.toResponse(user));
     }
 
     @PutMapping
-    public ResponseEntity<User> update(@RequestBody User user) {
+    public ResponseEntity<UserResponse> update(@RequestBody User user) {
         User updated = userService.update(user);
         if (updated == null) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(UserMapper.toResponse(updated));
     }
 
     @DeleteMapping("/{id}")
@@ -56,13 +58,14 @@ public class UserController {
     }
 
     @GetMapping
-    public ResponseEntity<List<User>> getAll() {
-        return ResponseEntity.ok(userService.getAll());
+    public ResponseEntity<List<UserResponse>> getAll() {
+        return ResponseEntity.ok(UserMapper.toResponseList(userService.getAll()));
     }
 
     @GetMapping("/email/{email}")
-    public ResponseEntity<User> findByEmail(@PathVariable String email) {
+    public ResponseEntity<UserResponse> findByEmail(@PathVariable String email) {
         return userService.findByEmail(email)
+                .map(UserMapper::toResponse)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

@@ -2,6 +2,7 @@ package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -24,6 +25,9 @@ public class Review {
     @Column(nullable = false)
     private String comment;
 
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
     protected Review() {
 
     }
@@ -34,6 +38,7 @@ public class Review {
         this.reviewerId = builder.reviewerId;
         this.rating = builder.rating;
         this.comment = builder.comment;
+        this.createdAt = builder.createdAt;
     }
 
     public UUID getId() {
@@ -56,6 +61,15 @@ public class Review {
         return comment;
     }
 
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = LocalDateTime.now();
+    }
+
     @Override
     public String toString() {
         return "Review{" +
@@ -64,6 +78,7 @@ public class Review {
                 ", reviewerId=" + reviewerId +
                 ", rating=" + rating +
                 ", comment='" + comment + '\'' +
+                ", createdAt=" + createdAt +
                 '}';
     }
 
@@ -73,7 +88,8 @@ public class Review {
         private UUID productId;
         private UUID reviewerId;
         private int rating;
-        private String comment;
+private String comment;
+        private LocalDateTime createdAt;
 
         public Builder setId(UUID id) {
             this.id = id;
@@ -100,12 +116,18 @@ public class Review {
             return this;
         }
 
+        public Builder setCreatedAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
+            return this;
+        }
+
         public Builder copy(Review review) {
             this.id = review.id;
             this.productId = review.productId;
             this.reviewerId = review.reviewerId;
             this.rating = review.rating;
             this.comment = review.comment;
+            this.createdAt = review.createdAt;
             return this;
         }
 

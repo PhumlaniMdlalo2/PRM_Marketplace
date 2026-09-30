@@ -4,5 +4,6 @@ public enum NotificationType {
     ORDER,
     PAYMENT,
     REVIEW,
+    MESSAGE,
     SYSTEM
 }
