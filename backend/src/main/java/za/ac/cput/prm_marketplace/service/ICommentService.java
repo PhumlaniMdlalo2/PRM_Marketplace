@@ -5,17 +5,22 @@ import za.ac.cput.prm_marketplace.domain.Comment;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Comments on the public board are readable by anyone. Writing takes the author from the token, and
+ * editing or removing a comment requires being its author.
+ */
 public interface ICommentService {
 
-    Comment create(Comment comment);
+    /** Creates a comment authored by the caller. */
+    Comment create(Comment comment, UUID authorId);
 
     Comment read(UUID id);
 
-    Comment update(Comment comment);
+    /** @return the updated comment, or null when it does not exist or the caller is not the author */
+    Comment update(Comment comment, UUID requesterId);
 
-    boolean delete(UUID id);
-
-    List<Comment> getAll();
+    /** @return false when it does not exist or the caller is not the author */
+    boolean delete(UUID id, UUID requesterId);
 
     List<Comment> getByPost(UUID postId);
 

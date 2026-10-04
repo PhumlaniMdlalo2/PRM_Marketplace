@@ -16,4 +16,18 @@ public interface ProductImageRepository extends JpaRepository<ProductImage, UUID
     Optional<ProductImage> findByProductIdAndPrimaryTrue(UUID productId);
 
     void deleteByProductId(UUID productId);
+
+    /**
+     * Ownership of an image is ownership of its product: product to vendor to user. An image stores
+     * no owner id of its own, so these are how a route checks that the caller is the seller whose
+     * listing the image belongs to.
+     */
+    Optional<ProductImage> findByIdAndProductVendorUserId(UUID id, UUID userId);
+
+    List<ProductImage> findByProductIdAndProductVendorUserIdOrderBySortOrderAsc(UUID productId, UUID userId);
+
+    boolean existsByProductIdAndProductVendorUserId(UUID productId, UUID userId);
+
+    /** Every image on a product, so a new primary can displace the old one. */
+    List<ProductImage> findByProductId(UUID productId);
 }

@@ -1,22 +1,31 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "reviews")
+@Table(name = "reviews",
+        uniqueConstraints = @UniqueConstraint(name = "uk_review_product_reviewer",
+                columnNames = {"product_id", "reviewer_id"}))
 public class Review {
 
-    @Id
+    /**
+     * Stays writable on purpose. The update endpoint takes the id in the body, so Jackson has to be
+     * able to read it. The service looks the row up by that id and refuses it unless the caller is
+     * the reviewer, so a forged id cannot reach another account's review.
+     */
+@Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false)
+    @Column(name = "product_id", nullable = false)
     private UUID productId;
 
-    @Column(nullable = false)
+    @Column(name = "reviewer_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID reviewerId;
 
     @Column(nullable = false)
@@ -25,7 +34,8 @@ public class Review {
     @Column(nullable = false)
     private String comment;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected Review() {

@@ -1,9 +1,9 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.Conversation;
@@ -20,7 +20,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,190 +36,208 @@ class MessageServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
-    @InjectMocks
-    private MessageServiceImpl messageService;
+    private MessageServiceImpl service;
 
-    private User buildUser(UUID id) {
-        return new User.Builder()
-                .setId(id)
-                .setName("Participant")
-                .setEmail("p@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
+    private UUID senderId;
+    private UUID recipientId;
+    private UUID outsiderId;
+    private UUID conversationId;
+    private UUID messageId;
 
-    private Conversation buildConversation(User buyer, User seller) {
-        return new Conversation.Builder()
-                .setId(UUID.randomUUID())
-                .setBuyer(buyer)
-                .setSeller(seller)
-                .build();
-    }
-
-    @Test
-    @DisplayName("create persists the message and touches the conversation")
-    void create_savesAndTouchesConversation() {
-        Conversation conversation = buildConversation(buildUser(UUID.randomUUID()), buildUser(UUID.randomUUID()));
-        Message message = new Message.Builder()
-                .setId(UUID.randomUUID())
-                .setConversation(conversation)
-                .setSender(buildUser(UUID.randomUUID()))
-                .setBody("Is this available?")
-                .build();
-
-        when(messageRepository.save(message)).thenReturn(message);
-        when(conversationRepository.save(conversation)).thenReturn(conversation);
-
-        assertThat(messageService.create(message)).isSameAs(message);
-        verify(conversationRepository).save(conversation);
+    @BeforeEach
+    void setUp() {
+        service = new MessageServiceImpl(messageRepository, conversationRepository, userRepository);
+        senderId = UUID.randomUUID();
+        recipientId = UUID.randomUUID();
+        outsiderId = UUID.randomUUID();
+        conversationId = UUID.randomUUID();
+        messageId = UUID.randomUUID();
     }
 
     @Test
-    @DisplayName("read missing message returns null")
-    void read_missing_returnsNull() {
-        UUID id = UUID.randomUUID();
-        when(messageRepository.findById(id)).thenReturn(Optional.empty());
+    @DisplayName("a participant sees the thread")
+    void getByConversation_allowsParticipant() {
+        Message message = buildMessage(senderId);
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+        when(messageRepository.findByConversationIdOrderBySentAtAsc(conversationId))
+                .thenReturn(List.of(message));
 
-        assertThat(messageService.read(id)).isNull();
+        assertThat(service.getByConversation(conversationId, recipientId)).containsExactly(message);
     }
 
     @Test
-    @DisplayName("update requires an existing message")
-    void update_missing_returnsNull() {
-        Message message = new Message.Builder()
-                .setId(UUID.randomUUID())
-                .setConversation(buildConversation(buildUser(UUID.randomUUID()), buildUser(UUID.randomUUID())))
-                .setSender(buildUser(UUID.randomUUID()))
-                .setBody("Hi")
-                .build();
-        when(messageRepository.existsById(message.getId())).thenReturn(false);
+    @DisplayName("a third party gets nothing, and no query is run against the thread")
+    void getByConversation_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
 
-        assertThat(messageService.update(message)).isNull();
+        assertThat(service.getByConversation(conversationId, outsiderId)).isEmpty();
+
+        verify(messageRepository, never()).findByConversationIdOrderBySentAtAsc(any());
     }
 
     @Test
-    @DisplayName("delete reports false for an unknown message")
-    void delete_missing_returnsFalse() {
-        UUID id = UUID.randomUUID();
-        when(messageRepository.existsById(id)).thenReturn(false);
+    @DisplayName("a missing thread yields no messages")
+    void getByConversation_missingThread() {
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.empty());
 
-        assertThat(messageService.delete(id)).isFalse();
+        assertThat(service.getByConversation(conversationId, senderId)).isEmpty();
     }
 
     @Test
-    @DisplayName("getByConversation with null id returns empty")
-    void getByConversation_withNull_returnsEmpty() {
-        assertThat(messageService.getByConversation(null)).isEmpty();
-    }
+    @DisplayName("a participant sends a message as themselves")
+    void send_storesTheAuthoredMessage() {
+        Conversation conversation = buildConversation(senderId, recipientId);
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conversation));
+        when(userRepository.findById(senderId)).thenReturn(Optional.of(buildUser(senderId)));
+        when(messageRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-    @Test
-    @DisplayName("send stores a trimmed SENT message and bumps the conversation")
-    void send_persistsTrimmedMessage() {
-        User buyer = buildUser(UUID.randomUUID());
-        Conversation conversation = buildConversation(buyer, buildUser(UUID.randomUUID()));
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
-        when(conversationRepository.save(conversation)).thenReturn(conversation);
-        when(messageRepository.save(any(Message.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
-        Message sent = messageService.send(conversation.getId(), buyer.getId(), "  Is this available?  ");
+        Message sent = service.send(conversationId, senderId, "  Is this available?  ");
 
         assertThat(sent).isNotNull();
+        assertThat(sent.getSender().getId()).isEqualTo(senderId);
+        // The body is trimmed so a leading space cannot disguise an empty message in the UI.
         assertThat(sent.getBody()).isEqualTo("Is this available?");
         assertThat(sent.getStatus()).isEqualTo(MessageStatus.SENT);
-        assertThat(sent.getSender()).isSameAs(buyer);
         verify(conversationRepository).save(conversation);
     }
 
     @Test
-    @DisplayName("send allows the seller as well as the buyer")
-    void send_allowsSeller() {
-        User seller = buildUser(UUID.randomUUID());
-        Conversation conversation = buildConversation(buildUser(UUID.randomUUID()), seller);
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-        when(userRepository.findById(seller.getId())).thenReturn(Optional.of(seller));
-        when(conversationRepository.save(conversation)).thenReturn(conversation);
-        when(messageRepository.save(any(Message.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+    @DisplayName("a third party cannot post into the thread")
+    void send_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
 
-        assertThat(messageService.send(conversation.getId(), seller.getId(), "Yes it is"))
-                .isNotNull();
-    }
+        assertThat(service.send(conversationId, outsiderId, "hello")).isNull();
 
-    @Test
-    @DisplayName("send rejects non-participants")
-    void send_rejectsOutsider() {
-        Conversation conversation = buildConversation(buildUser(UUID.randomUUID()), buildUser(UUID.randomUUID()));
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-
-        assertThat(messageService.send(conversation.getId(), UUID.randomUUID(), "Hello"))
-                .isNull();
         verify(messageRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("send rejects a missing conversation, blank body or missing sender")
-    void send_rejectsInvalidInput() {
-        Conversation conversation = buildConversation(buildUser(UUID.randomUUID()), buildUser(UUID.randomUUID()));
-        User buyer = conversation.getBuyer();
+    @DisplayName("an empty body is refused before the thread is touched")
+    void send_refusesBlankBody() {
+        assertThat(service.send(conversationId, senderId, null)).isNull();
+        assertThat(service.send(conversationId, senderId, "   ")).isNull();
 
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-
-        assertThat(messageService.send(conversation.getId(), buyer.getId(), null)).isNull();
-        assertThat(messageService.send(conversation.getId(), buyer.getId(), "   ")).isNull();
-        assertThat(messageService.send(conversation.getId(), null, "Hello")).isNull();
-
-        UUID unknown = UUID.randomUUID();
-        when(conversationRepository.findById(unknown)).thenReturn(Optional.empty());
-        assertThat(messageService.send(unknown, buyer.getId(), "Hello")).isNull();
+        verify(conversationRepository, never()).findById(any());
     }
 
     @Test
-    @DisplayName("markRead delegates to the bulk update and ignores nulls")
-    void markRead_delegates() {
-        UUID conversationId = UUID.randomUUID();
-        UUID readerId = UUID.randomUUID();
+    @DisplayName("sending into a missing thread returns null")
+    void send_missingThread() {
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.empty());
 
-        when(messageRepository.markConversationRead(conversationId, readerId, MessageStatus.READ))
+        assertThat(service.send(conversationId, senderId, "hello")).isNull();
+    }
+
+    @Test
+    @DisplayName("marking read only touches messages the reader did not write")
+    void markRead_excludesOwnMessages() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+        when(messageRepository.markConversationRead(conversationId, recipientId, MessageStatus.READ))
                 .thenReturn(3);
 
-        assertThat(messageService.markRead(conversationId, readerId)).isEqualTo(3);
-        assertThat(messageService.markRead(null, readerId)).isZero();
-        assertThat(messageService.markRead(conversationId, null)).isZero();
+        assertThat(service.markRead(conversationId, recipientId)).isEqualTo(3);
     }
 
     @Test
-    @DisplayName("unreadCount counts everything that is not READ")
-    void unreadCount_countsNonRead() {
-        UUID conversationId = UUID.randomUUID();
-        when(messageRepository.countByConversationIdAndStatusNot(conversationId, MessageStatus.READ))
-                .thenReturn(2L);
+    @DisplayName("a third party cannot mark somebody else's messages as read")
+    void markRead_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
 
-        assertThat(messageService.unreadCount(conversationId)).isEqualTo(2L);
-        assertThat(messageService.unreadCount(null)).isZero();
+        assertThat(service.markRead(conversationId, outsiderId)).isZero();
+
+        verify(messageRepository, never()).markConversationRead(any(), any(), any());
     }
 
     @Test
-    @DisplayName("create without a conversation does not touch the conversation repository")
-    void create_withoutConversation_doesNotTouchConversation() {
-        Message message = new Message.Builder()
-                .setId(UUID.randomUUID())
-                .setSender(buildUser(UUID.randomUUID()))
-                .setBody("Orphan")
+    @DisplayName("marking read needs a thread and a reader")
+    void markRead_rejectsNulls() {
+        assertThat(service.markRead(null, recipientId)).isZero();
+        assertThat(service.markRead(conversationId, null)).isZero();
+    }
+
+    @Test
+    @DisplayName("the unread count excludes the caller's own messages")
+    void unreadCount_excludesOwnMessages() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+        when(messageRepository.countByConversationIdAndStatusNotAndSender_IdNot(
+                conversationId, MessageStatus.READ, recipientId)).thenReturn(2L);
+
+        assertThat(service.unreadCount(conversationId, recipientId)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("a third party is told there is nothing unread")
+    void unreadCount_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+
+        assertThat(service.unreadCount(conversationId, outsiderId)).isZero();
+    }
+
+    @Test
+    @DisplayName("a participant can read a single message from the thread")
+    void read_allowsParticipant() {
+        Message message = buildMessage(senderId);
+        when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+
+        assertThat(service.read(messageId, recipientId)).isSameAs(message);
+    }
+
+    @Test
+    @DisplayName("guessing a message id does not reach a thread the caller is not in")
+    void read_refusesOutsider() {
+        Message message = buildMessage(senderId);
+        when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(senderId, recipientId)));
+
+        assertThat(service.read(messageId, outsiderId)).isNull();
+    }
+
+    @Test
+    @DisplayName("reading a missing message or id returns null")
+    void read_missingReturnsNull() {
+        when(messageRepository.findById(messageId)).thenReturn(Optional.empty());
+
+        assertThat(service.read(messageId, senderId)).isNull();
+        assertThat(service.read(null, senderId)).isNull();
+    }
+
+    @Test
+    @DisplayName("a message with no conversation cannot be read")
+    void read_withoutConversationReturnsNull() {
+        Message orphan = new Message.Builder().setId(messageId).setBody("orphan").build();
+        when(messageRepository.findById(messageId)).thenReturn(Optional.of(orphan));
+
+        assertThat(service.read(messageId, senderId)).isNull();
+    }
+
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
+    }
+
+    private Conversation buildConversation(UUID buyer, UUID seller) {
+        return new Conversation.Builder()
+                .setId(conversationId)
+                .setBuyer(buildUser(buyer))
+                .setSeller(buildUser(seller))
                 .build();
-        when(messageRepository.save(message)).thenReturn(message);
-
-        assertThat(messageService.create(message)).isSameAs(message);
-        verify(conversationRepository, never()).save(any(Conversation.class));
     }
 
-    @Test
-    @DisplayName("getAll delegates to the repository")
-    void getAll_delegates() {
-        List<Message> all = List.of();
-        when(messageRepository.findAll()).thenReturn(all);
-
-        assertThat(messageService.getAll()).isSameAs(all);
+    private Message buildMessage(UUID sender) {
+        return new Message.Builder()
+                .setId(messageId)
+                .setConversation(buildConversation(senderId, recipientId))
+                .setSender(buildUser(sender))
+                .setBody("Is this still available?")
+                .build();
     }
 }

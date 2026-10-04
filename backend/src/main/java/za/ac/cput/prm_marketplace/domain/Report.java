@@ -1,9 +1,9 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -12,10 +12,12 @@ public class Report {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
     @ManyToOne
     @JoinColumn(name = "reporter_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User reporter;
 
     @Enumerated(EnumType.STRING)
@@ -28,17 +30,22 @@ public class Report {
     @Column(nullable = false, length = 1000)
     private String reason;
 
+    /** Set by moderation only. The service forces a new report to OPEN regardless of the body. */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private ReportStatus status;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     @Column(name = "resolved_at")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime resolvedAt;
 
     @Column(length = 1000)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String resolutionNotes;
 
     protected Report() {
@@ -112,12 +119,12 @@ public class Report {
         if (this == o) return true;
         if (!(o instanceof Report)) return false;
         Report report = (Report) o;
-        return Objects.equals(id, report.id);
+        return id != null && id.equals(report.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

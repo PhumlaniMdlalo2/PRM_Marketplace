@@ -1,12 +1,13 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -58,14 +59,26 @@ public class Order {
         return id;
     }
 
+    /**
+ * Server-owned. The buyer is taken from the authenticated caller, so accepting it from a request
+ * body would let anyone place an order in somebody else's name.
+ */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public User getBuyer() {
         return buyer;
     }
 
+    /** Server-owned. A request body must not be able to declare an order already delivered. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public OrderStatus getStatus() {
         return status;
     }
 
+    /**
+     * Server-owned, recomputed from the catalogue at checkout. A body-supplied total would let a
+     * client pay whatever it likes.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public BigDecimal getTotalAmount() {
         return totalAmount;
     }
@@ -74,14 +87,21 @@ public class Order {
         return shippingAddress;
     }
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
     }
 
+    /**
+     * Lazy collection. {@code open-in-view} is false, so serialising it from a controller would
+     * throw once the transaction is closed.
+     */
+    @JsonIgnore
     public List<OrderItem> getItems() {
         return items;
     }
@@ -106,6 +126,22 @@ public class Order {
         this.status = status;
     }
 
+    /**
+     * Delivery address only, and only while the order is still PENDING. Used by the checkout
+     * flow and by a buyer correcting where an order is going.
+     */
+    public void setShippingAddress(Address shippingAddress) {
+        this.shippingAddress = shippingAddress;
+    }
+
+    /**
+     * Server-owned like the rest: set once, from the order's own line items, and never taken from
+     * a request body.
+     */
+    public void setTotalAmount(BigDecimal totalAmount) {
+        this.totalAmount = totalAmount;
+    }
+
     public void removeItem(OrderItem item) {
         items.remove(item);
         item.setOrder(null);
@@ -116,12 +152,12 @@ public class Order {
         if (this == o) return true;
         if (!(o instanceof Order)) return false;
         Order order = (Order) o;
-        return Objects.equals(id, order.id);
+        return id != null && id.equals(order.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

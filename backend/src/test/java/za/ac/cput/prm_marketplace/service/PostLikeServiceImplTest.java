@@ -1,9 +1,9 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,191 +36,166 @@ class PostLikeServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
-    @InjectMocks
-    private PostLikeServiceImpl postLikeService;
+    private PostLikeServiceImpl service;
 
-    private User buildUser(UUID id) {
-        return new User.Builder()
-                .setId(id)
-                .setName("Reader")
-                .setEmail("reader@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
+    private UUID callerId;
+    private UUID postId;
+    private UUID likeId;
+    private BulletinPost post;
+    private User caller;
 
-    private BulletinPost buildPost() {
-        return buildPost(0);
-    }
-
-    private BulletinPost buildPost(int likeCount) {
-        return new BulletinPost.Builder()
-                .setId(UUID.randomUUID())
-                .setAuthor(buildUser(UUID.randomUUID()))
-                .setTitle("Selling a desk")
-                .setBody("Desk in good condition")
-                .setLikeCount(likeCount)
+    @BeforeEach
+    void setUp() {
+        service = new PostLikeServiceImpl(postLikeRepository, bulletinPostRepository, userRepository);
+        callerId = UUID.randomUUID();
+        postId = UUID.randomUUID();
+        likeId = UUID.randomUUID();
+        caller = new User.Builder().setId(callerId).setEmail("c@example.com").build();
+        post = new BulletinPost.Builder()
+                .setId(postId)
+                .setAuthor(new User.Builder().setId(UUID.randomUUID()).setEmail("a@example.com").build())
+                .setTitle("Water outage")
+                .setBody("Supply is interrupted.")
                 .build();
     }
 
     @Test
-    @DisplayName("create persists the like")
-    void create_saves() {
-        PostLike like = new PostLike.Builder()
-                .setId(UUID.randomUUID())
-                .setPost(buildPost())
-                .setUser(buildUser(UUID.randomUUID()))
-                .build();
-        when(postLikeRepository.save(like)).thenReturn(like);
+    @DisplayName("the first toggle likes the post as the caller and raises the counter")
+    void toggle_firstClickLikes() {
+        when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(caller));
+        when(postLikeRepository.findByPostIdAndUserId(postId, callerId)).thenReturn(Optional.empty());
+        when(postLikeRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-        assertThat(postLikeService.create(like)).isSameAs(like);
+        PostLike saved = service.toggle(postId, callerId);
+
+        assertThat(saved).isNotNull();
+        assertThat(saved.getUser().getId()).isEqualTo(callerId);
+        assertThat(saved.getPost().getId()).isEqualTo(postId);
+        assertThat(post.getLikeCount()).isEqualTo(1);
+        verify(bulletinPostRepository).save(post);
     }
 
     @Test
-    @DisplayName("read missing like returns null")
-    void read_missing_returnsNull() {
-        UUID id = UUID.randomUUID();
-        when(postLikeRepository.findById(id)).thenReturn(Optional.empty());
+    @DisplayName("the second toggle removes the caller's like and lowers the counter")
+    void toggle_secondClickUnlikes() {
+        PostLike existing = new PostLike.Builder().setId(likeId).setPost(post).setUser(caller).build();
+        post = postWithLikeCount(1);
+        existing = new PostLike.Builder().setId(likeId).setPost(post).setUser(caller).build();
+        when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(caller));
+        when(postLikeRepository.findByPostIdAndUserId(postId, callerId)).thenReturn(Optional.of(existing));
 
-        assertThat(postLikeService.read(id)).isNull();
-    }
+        PostLike result = service.toggle(postId, callerId);
 
-    @Test
-    @DisplayName("update requires an existing like")
-    void update_missing_returnsNull() {
-        PostLike like = new PostLike.Builder()
-                .setId(UUID.randomUUID())
-                .setPost(buildPost())
-                .setUser(buildUser(UUID.randomUUID()))
-                .build();
-        when(postLikeRepository.existsById(like.getId())).thenReturn(false);
-
-        assertThat(postLikeService.update(like)).isNull();
-    }
-
-    @Test
-    @DisplayName("delete reports false for an unknown like")
-    void delete_missing_returnsFalse() {
-        UUID id = UUID.randomUUID();
-        when(postLikeRepository.existsById(id)).thenReturn(false);
-
-        assertThat(postLikeService.delete(id)).isFalse();
-    }
-
-    @Test
-    @DisplayName("toggle removes an existing like and decrements the counter")
-    void toggle_existingLike_removes() {
-        BulletinPost post = buildPost(3);
-        User user = buildUser(UUID.randomUUID());
-        PostLike existing = new PostLike.Builder()
-                .setId(UUID.randomUUID())
-                .setPost(post)
-                .setUser(user)
-                .build();
-
-        when(postLikeRepository.findByPostIdAndUserId(post.getId(), user.getId()))
-                .thenReturn(Optional.of(existing));
-        when(bulletinPostRepository.findById(post.getId())).thenReturn(Optional.of(post));
-
-        int before = post.getLikeCount();
-
-        assertThat(postLikeService.toggle(post.getId(), user.getId())).isNull();
+        // A null result means the like was removed, which is not an error.
+        assertThat(result).isNull();
         verify(postLikeRepository).delete(existing);
-        assertThat(post.getLikeCount()).isEqualTo(before - 1);
-    }
-
-    @Test
-    @DisplayName("the like counter never drops below zero")
-    void toggle_decrement_floorsAtZero() {
-        BulletinPost post = buildPost(0);
-        User user = buildUser(UUID.randomUUID());
-        PostLike existing = new PostLike.Builder()
-                .setId(UUID.randomUUID())
-                .setPost(post)
-                .setUser(user)
-                .build();
-
-        when(postLikeRepository.findByPostIdAndUserId(post.getId(), user.getId()))
-                .thenReturn(Optional.of(existing));
-        when(bulletinPostRepository.findById(post.getId())).thenReturn(Optional.of(post));
-
-        postLikeService.toggle(post.getId(), user.getId());
-
         assertThat(post.getLikeCount()).isZero();
     }
 
     @Test
-    @DisplayName("toggle creates a like and increments the counter")
-    void toggle_newLike_creates() {
-        BulletinPost post = buildPost();
-        User user = buildUser(UUID.randomUUID());
-
-        when(postLikeRepository.findByPostIdAndUserId(post.getId(), user.getId()))
-                .thenReturn(Optional.empty());
-        when(bulletinPostRepository.findById(post.getId())).thenReturn(Optional.of(post));
-        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
-        when(postLikeRepository.save(any(PostLike.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
-        int before = post.getLikeCount();
-
-        PostLike saved = postLikeService.toggle(post.getId(), user.getId());
-
-        assertThat(saved).isNotNull();
-        assertThat(saved.getPost()).isSameAs(post);
-        assertThat(saved.getUser()).isSameAs(user);
-        assertThat(post.getLikeCount()).isEqualTo(before + 1);
-    }
-
-    @Test
-    @DisplayName("toggle returns null when the post does not exist")
-    void toggle_missingPost_returnsNull() {
-        UUID postId = UUID.randomUUID();
-        UUID userId = UUID.randomUUID();
-
-        when(postLikeRepository.findByPostIdAndUserId(postId, userId)).thenReturn(Optional.empty());
+    @DisplayName("toggling a post that does not exist returns null and touches nothing")
+    void toggle_unknownPostReturnsNull() {
         when(bulletinPostRepository.findById(postId)).thenReturn(Optional.empty());
 
-        assertThat(postLikeService.toggle(postId, userId)).isNull();
-        verify(postLikeRepository, never()).save(any());
+        assertThat(service.toggle(postId, callerId)).isNull();
+        verifyNoInteractions(postLikeRepository);
     }
 
     @Test
-    @DisplayName("toggle returns null when the user does not exist")
-    void toggle_missingUser_returnsNull() {
-        BulletinPost post = buildPost();
-        UUID userId = UUID.randomUUID();
+    @DisplayName("toggling as an account with no user row returns null and touches nothing")
+    void toggle_unknownUserReturnsNull() {
+        when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(userRepository.findById(callerId)).thenReturn(Optional.empty());
 
-        when(postLikeRepository.findByPostIdAndUserId(post.getId(), userId)).thenReturn(Optional.empty());
-        when(bulletinPostRepository.findById(post.getId())).thenReturn(Optional.of(post));
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
-
-        assertThat(postLikeService.toggle(post.getId(), userId)).isNull();
-        verify(postLikeRepository, never()).save(any());
+        assertThat(service.toggle(postId, callerId)).isNull();
+        verifyNoInteractions(postLikeRepository);
     }
 
     @Test
-    @DisplayName("toggle rejects null arguments")
+    @DisplayName("toggle rejects nulls without touching the repositories")
     void toggle_rejectsNulls() {
-        assertThat(postLikeService.toggle(null, UUID.randomUUID())).isNull();
-        assertThat(postLikeService.toggle(UUID.randomUUID(), null)).isNull();
+        assertThat(service.toggle(null, callerId)).isNull();
+        assertThat(service.toggle(postId, null)).isNull();
+        verifyNoInteractions(postLikeRepository);
+        verifyNoInteractions(bulletinPostRepository);
     }
 
     @Test
-    @DisplayName("hasLiked rejects null arguments")
-    void hasLiked_rejectsNulls() {
-        assertThat(postLikeService.hasLiked(null, UUID.randomUUID())).isFalse();
-        assertThat(postLikeService.hasLiked(UUID.randomUUID(), null)).isFalse();
+    @DisplayName("the generic create, update, delete and list-all operations are gone")
+    void genericCrud_isNotReachable() {
+        // Compile-time evidence lives in IPostLikeService. These reflective assertions pin the
+        // contract so a future generic method is not quietly reintroduced.
+        assertThat(java.util.Arrays.stream(IPostLikeService.class.getMethods())
+                .map(java.lang.reflect.Method::getName))
+                .containsExactlyInAnyOrder(
+                        "toggle", "hasLiked", "countByPost", "getByUser");
     }
 
     @Test
-    @DisplayName("countByPost with null post id is zero")
-    void countByPost_withNull_isZero() {
-        assertThat(postLikeService.countByPost(null)).isZero();
+    @DisplayName("hasLiked reports the caller's own like and rejects nulls")
+    void hasLiked_isScopedToTheCaller() {
+        when(postLikeRepository.existsByPostIdAndUserId(postId, callerId)).thenReturn(true);
+
+        assertThat(service.hasLiked(postId, callerId)).isTrue();
+        assertThat(service.hasLiked(null, callerId)).isFalse();
+        assertThat(service.hasLiked(postId, null)).isFalse();
     }
 
     @Test
-    @DisplayName("getByUser with null user id returns empty")
-    void getByUser_withNull_returnsEmpty() {
-        assertThat(postLikeService.getByUser(null)).isEmpty();
+    @DisplayName("countByPost counts the likes on one post and rejects null")
+    void countByPost_isScopedToThePost() {
+        when(postLikeRepository.countByPostId(postId)).thenReturn(5L);
+
+        assertThat(service.countByPost(postId)).isEqualTo(5L);
+        assertThat(service.countByPost(null)).isZero();
+    }
+
+    @Test
+    @DisplayName("getByUser returns only the caller's likes and rejects null")
+    void getByUser_isScopedToTheCaller() {
+        PostLike mine = new PostLike.Builder().setId(likeId).setPost(post).setUser(caller).build();
+        when(postLikeRepository.findByUserId(callerId)).thenReturn(List.of(mine));
+
+        assertThat(service.getByUser(callerId)).containsExactly(mine);
+        assertThat(service.getByUser(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("unliking something the caller never liked cannot drive the counter negative")
+    void syncLikeCount_neverGoesNegative() {
+        post = postWithLikeCount(0);
+        PostLike existing = new PostLike.Builder().setId(likeId).setPost(post).setUser(caller).build();
+        when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(caller));
+        when(postLikeRepository.findByPostIdAndUserId(postId, callerId)).thenReturn(Optional.of(existing));
+
+        service.toggle(postId, callerId);
+
+        assertThat(post.getLikeCount()).isZero();
+    }
+
+@Test
+    @DisplayName("the like service never writes or removes another account's like")
+    void toggle_onlyEverTouchesTheCallersLike() {
+        when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(caller));
+        when(postLikeRepository.findByPostIdAndUserId(postId, callerId)).thenReturn(Optional.empty());
+        when(postLikeRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        PostLike saved = service.toggle(postId, callerId);
+
+        assertThat(saved.getUser().getId()).isEqualTo(callerId);
+        verify(postLikeRepository, never()).delete(any());
+        verify(postLikeRepository, never()).deleteById(any());
+    }
+
+    /** The entity deliberately exposes no like counter setter, so the count is seeded via the builder. */
+    private BulletinPost postWithLikeCount(int likeCount) {
+        return new BulletinPost.Builder()
+                .copy(post)
+                .setLikeCount(likeCount)
+                .build();
     }
 }

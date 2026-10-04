@@ -1,16 +1,18 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.Conversation;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.repository.ConversationRepository;
-import za.ac.cput.prm_marketplace.repository.MessageRepository;
+import za.ac.cput.prm_marketplace.repository.ProductRepository;
+import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,222 +32,208 @@ class ConversationServiceImplTest {
     private ConversationRepository conversationRepository;
 
     @Mock
-    private MessageRepository messageRepository;
+    private UserRepository userRepository;
 
-    @InjectMocks
-    private ConversationServiceImpl conversationService;
+    @Mock
+    private ProductRepository productRepository;
 
-    private User buildUser() {
-        return new User.Builder()
-                .setId(UUID.randomUUID())
-                .setName("Participant")
-                .setEmail("p@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
+    private ConversationServiceImpl service;
 
-    private Conversation buildConversation(User buyer, User seller, Product product) {
-        return new Conversation.Builder()
-                .setId(UUID.randomUUID())
-                .setBuyer(buyer)
-                .setSeller(seller)
-                .setProduct(product)
-                .build();
-    }
+    private UUID buyerId;
+    private UUID sellerId;
+    private UUID outsiderId;
+    private UUID conversationId;
+    private UUID productId;
 
-    @Test
-    @DisplayName("create persists and returns the conversation")
-    void create_saves() {
-        Conversation conversation = buildConversation(buildUser(), buildUser(), null);
-        when(conversationRepository.save(conversation)).thenReturn(conversation);
-
-        assertThat(conversationService.create(conversation)).isSameAs(conversation);
+    @BeforeEach
+    void setUp() {
+        service = new ConversationServiceImpl(conversationRepository, userRepository, productRepository);
+        buyerId = UUID.randomUUID();
+        sellerId = UUID.randomUUID();
+        outsiderId = UUID.randomUUID();
+        conversationId = UUID.randomUUID();
+        productId = UUID.randomUUID();
     }
 
     @Test
-    @DisplayName("create with null returns null without touching the repository")
-    void create_withNull_returnsNull() {
-        assertThat(conversationService.create(null)).isNull();
+    @DisplayName("starting a thread makes the requester the buyer and the other party the seller")
+    void getOrCreate_assignsRequesterAsBuyer() {
+        when(userRepository.findById(buyerId)).thenReturn(Optional.of(buildUser(buyerId)));
+        when(userRepository.findById(sellerId)).thenReturn(Optional.of(buildUser(sellerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.of(buildProduct()));
+        when(conversationRepository.findByBuyerIdAndSellerIdAndProductId(buyerId, sellerId, productId))
+                .thenReturn(Optional.empty());
+        when(conversationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Conversation created = service.getOrCreate(buyerId, sellerId, productId);
+
+        assertThat(created).isNotNull();
+        assertThat(created.getBuyer().getId()).isEqualTo(buyerId);
+        assertThat(created.getSeller().getId()).isEqualTo(sellerId);
+    }
+
+    @Test
+    @DisplayName("an existing thread is reused rather than duplicated")
+    void getOrCreate_reusesExistingThread() {
+        Conversation existing = buildConversation(buyerId, sellerId);
+        when(userRepository.findById(buyerId)).thenReturn(Optional.of(buildUser(buyerId)));
+        when(userRepository.findById(sellerId)).thenReturn(Optional.of(buildUser(sellerId)));
+        when(conversationRepository.findByBuyerIdAndSellerIdAndProductIsNull(buyerId, sellerId))
+                .thenReturn(Optional.of(existing));
+
+        assertThat(service.getOrCreate(buyerId, sellerId, null)).isSameAs(existing);
         verify(conversationRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("read returns null for a missing conversation")
-    void read_missing_returnsNull() {
-        UUID id = UUID.randomUUID();
-        when(conversationRepository.findById(id)).thenReturn(Optional.empty());
+    @DisplayName("a conversation with yourself is refused")
+    void getOrCreate_refusesSelfConversation() {
+        assertThat(service.getOrCreate(buyerId, buyerId, productId)).isNull();
 
-        assertThat(conversationService.read(id)).isNull();
+        verifyNoInteractions(userRepository);
     }
 
     @Test
-    @DisplayName("read with null id returns null without querying")
-    void read_withNullId_returnsNull() {
-        assertThat(conversationService.read(null)).isNull();
-        verify(conversationRepository, never()).findById(any());
-    }
+    @DisplayName("starting a thread requires both accounts to exist")
+    void getOrCreate_requiresBothUsers() {
+        when(userRepository.findById(buyerId)).thenReturn(Optional.empty());
+        assertThat(service.getOrCreate(buyerId, sellerId, productId)).isNull();
 
-    @Test
-    @DisplayName("update requires an existing id")
-    void update_missing_returnsNull() {
-        Conversation conversation = buildConversation(buildUser(), buildUser(), null);
-        when(conversationRepository.existsById(conversation.getId())).thenReturn(false);
+        when(userRepository.findById(buyerId)).thenReturn(Optional.of(buildUser(buyerId)));
+        when(userRepository.findById(sellerId)).thenReturn(Optional.empty());
+        assertThat(service.getOrCreate(buyerId, sellerId, productId)).isNull();
 
-        assertThat(conversationService.update(conversation)).isNull();
         verify(conversationRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("update saves when the conversation exists")
-    void update_existing_saves() {
-        Conversation conversation = buildConversation(buildUser(), buildUser(), null);
-        when(conversationRepository.existsById(conversation.getId())).thenReturn(true);
-        when(conversationRepository.save(conversation)).thenReturn(conversation);
+    @DisplayName("an unknown product id yields a thread with no product attached")
+    void getOrCreate_unknownProductAttachesNothing() {
+        when(userRepository.findById(buyerId)).thenReturn(Optional.of(buildUser(buyerId)));
+        when(userRepository.findById(sellerId)).thenReturn(Optional.of(buildUser(sellerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.empty());
+        when(conversationRepository.findByBuyerIdAndSellerIdAndProductId(buyerId, sellerId, productId))
+                .thenReturn(Optional.empty());
+        when(conversationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-        assertThat(conversationService.update(conversation)).isSameAs(conversation);
+        Conversation created = service.getOrCreate(buyerId, sellerId, productId);
+
+        assertThat(created).isNotNull();
+        assertThat(created.getProduct()).isNull();
     }
 
     @Test
-    @DisplayName("delete reports false when the conversation is absent")
-    void delete_missing_returnsFalse() {
-        UUID id = UUID.randomUUID();
-        when(conversationRepository.existsById(id)).thenReturn(false);
+    @DisplayName("both participants can read the thread")
+    void read_allowsParticipants() {
+        Conversation conversation = buildConversation(buyerId, sellerId);
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conversation));
 
-        assertThat(conversationService.delete(id)).isFalse();
+        assertThat(service.read(conversationId, buyerId)).isSameAs(conversation);
+        assertThat(service.read(conversationId, sellerId)).isSameAs(conversation);
+    }
+
+    @Test
+    @DisplayName("a third party cannot read the thread")
+    void read_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
+
+        assertThat(service.read(conversationId, outsiderId)).isNull();
+    }
+
+    @Test
+    @DisplayName("reading a missing thread returns null")
+    void read_missingReturnsNull() {
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.empty());
+
+        assertThat(service.read(conversationId, buyerId)).isNull();
+        assertThat(service.read(null, buyerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("a participant can delete the thread")
+    void delete_allowsParticipant() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
+
+        assertThat(service.delete(conversationId, buyerId)).isTrue();
+        verify(conversationRepository).deleteById(conversationId);
+    }
+
+    @Test
+    @DisplayName("an outsider cannot delete the thread")
+    void delete_refusesOutsider() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
+
+        assertThat(service.delete(conversationId, outsiderId)).isFalse();
         verify(conversationRepository, never()).deleteById(any());
     }
 
     @Test
-    @DisplayName("delete removes an existing conversation")
-    void delete_existing_returnsTrue() {
-        UUID id = UUID.randomUUID();
-        when(conversationRepository.existsById(id)).thenReturn(true);
+    @DisplayName("the thread list is scoped to the caller")
+    void getForUser_scopesToTheRequester() {
+        Conversation conversation = buildConversation(buyerId, sellerId);
+        when(conversationRepository.findByBuyerIdOrSellerIdOrderByLastMessageAtDesc(buyerId, buyerId))
+                .thenReturn(List.of(conversation));
 
-        assertThat(conversationService.delete(id)).isTrue();
-        verify(conversationRepository).deleteById(id);
+        assertThat(service.getForUser(buyerId)).containsExactly(conversation);
+        assertThat(service.getForUser(null)).isEmpty();
     }
 
     @Test
-    @DisplayName("getForUser returns conversations for either side of the trade")
-    void getForUser_queriesBothSides() {
-        UUID userId = UUID.randomUUID();
-        List<Conversation> expected = List.of(buildConversation(buildUser(), buildUser(), null));
-        when(conversationRepository.findByBuyerIdOrSellerIdOrderByLastMessageAtDesc(userId, userId))
-                .thenReturn(expected);
+    @DisplayName("the unread count is scoped to the caller")
+    void unreadCount_scopesToTheRequester() {
+        when(conversationRepository.countUnreadConversations(buyerId,
+                za.ac.cput.prm_marketplace.domain.MessageStatus.READ)).thenReturn(4L);
 
-        assertThat(conversationService.getForUser(userId)).isEqualTo(expected);
+        assertThat(service.unreadCount(buyerId)).isEqualTo(4L);
+        assertThat(service.unreadCount(null)).isZero();
     }
 
     @Test
-    @DisplayName("getForUser with null id returns an empty list")
-    void getForUser_withNullId_returnsEmpty() {
-        assertThat(conversationService.getForUser(null)).isEmpty();
+    @DisplayName("participantIds reports both parties and nothing for a missing thread")
+    void participantIds_reportsBothParties() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
+
+        assertThat(service.participantIds(conversationId)).containsExactly(buyerId, sellerId);
+        assertThat(service.participantIds(UUID.randomUUID())).isEmpty();
+        assertThat(service.participantIds(null)).isEmpty();
     }
 
     @Test
-    @DisplayName("getOrCreate reuses an existing conversation for the same product")
-    void getOrCreate_reusesExisting() {
-        User buyer = buildUser();
-        User seller = buildUser();
-        Product product = new Product.Builder()
-                .id(UUID.randomUUID())
-                .name("Textbook")
-                .build();
-
-        Conversation existing = buildConversation(buyer, seller, product);
-        when(conversationRepository.findByBuyerIdAndSellerIdAndProductId(
-                buyer.getId(), seller.getId(), product.getId()))
-                .thenReturn(Optional.of(existing));
-
-        assertThat(conversationService.getOrCreate(buyer, seller, product)).isSameAs(existing);
-        verify(conversationRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("getOrCreate matches a general conversation when no product is given")
-    void getOrCreate_reusesGeneralConversation() {
-        User buyer = buildUser();
-        User seller = buildUser();
-
-        Conversation existing = buildConversation(buyer, seller, null);
-        when(conversationRepository.findByBuyerIdAndSellerIdAndProductIsNull(
-                buyer.getId(), seller.getId()))
-                .thenReturn(Optional.of(existing));
-
-        assertThat(conversationService.getOrCreate(buyer, seller, null)).isSameAs(existing);
-    }
-
-    @Test
-    @DisplayName("getOrCreate opens a new conversation when none exists")
-    void getOrCreate_createsWhenAbsent() {
-        User buyer = buildUser();
-        User seller = buildUser();
-        Product product = new Product.Builder().id(UUID.randomUUID()).name("Textbook").build();
-
-        when(conversationRepository.findByBuyerIdAndSellerIdAndProductId(
-                buyer.getId(), seller.getId(), product.getId()))
+    @DisplayName("a thread whose product is re-read keeps the stored product reference")
+    void getOrCreate_reusesStoredProduct() {
+        when(userRepository.findById(buyerId)).thenReturn(Optional.of(buildUser(buyerId)));
+        when(userRepository.findById(sellerId)).thenReturn(Optional.of(buildUser(sellerId)));
+        Product product = buildProduct();
+        when(productRepository.findById(productId)).thenReturn(Optional.of(product));
+        when(conversationRepository.findByBuyerIdAndSellerIdAndProductId(buyerId, sellerId, productId))
                 .thenReturn(Optional.empty());
-        when(conversationRepository.save(any(Conversation.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(conversationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-        Conversation created = conversationService.getOrCreate(buyer, seller, product);
+        Conversation created = service.getOrCreate(buyerId, sellerId, productId);
 
-        assertThat(created).isNotNull();
-        assertThat(created.getBuyer()).isSameAs(buyer);
-        assertThat(created.getSeller()).isSameAs(seller);
-        assertThat(created.getProduct()).isSameAs(product);
+        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationRepository).save(captor.capture());
+        assertThat(captor.getValue().getProduct()).isSameAs(product);
+        assertThat(created.getProduct().getId()).isEqualTo(productId);
     }
 
-    @Test
-    @DisplayName("getOrCreate refuses to open a conversation with yourself")
-    void getOrCreate_withSelf_returnsNull() {
-        User user = buildUser();
-        assertThat(conversationService.getOrCreate(user, user, null)).isNull();
-        verify(conversationRepository, never()).save(any());
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }
 
-    @Test
-    @DisplayName("getOrCreate requires both participants")
-    void getOrCreate_withMissingParty_returnsNull() {
-        assertThat(conversationService.getOrCreate(null, buildUser(), null)).isNull();
-        assertThat(conversationService.getOrCreate(buildUser(), null, null)).isNull();
+    private Product buildProduct() {
+        return new Product.Builder().id(productId).name("Widget").build();
     }
 
-    @Test
-    @DisplayName("readForParticipant allows the buyer")
-    void readForParticipant_allowsBuyer() {
-        User buyer = buildUser();
-        Conversation conversation = buildConversation(buyer, buildUser(), null);
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-
-        assertThat(conversationService.readForParticipant(conversation.getId(), buyer.getId()))
-                .isSameAs(conversation);
-    }
-
-    @Test
-    @DisplayName("readForParticipant allows the seller")
-    void readForParticipant_allowsSeller() {
-        User seller = buildUser();
-        Conversation conversation = buildConversation(buildUser(), seller, null);
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-
-        assertThat(conversationService.readForParticipant(conversation.getId(), seller.getId()))
-                .isSameAs(conversation);
-    }
-
-    @Test
-    @DisplayName("readForParticipant hides the conversation from outsiders")
-    void readForParticipant_deniesOutsider() {
-        Conversation conversation = buildConversation(buildUser(), buildUser(), null);
-        when(conversationRepository.findById(conversation.getId())).thenReturn(Optional.of(conversation));
-
-        assertThat(conversationService.readForParticipant(conversation.getId(), UUID.randomUUID()))
-                .isNull();
-    }
-
-    @Test
-    @DisplayName("unreadCount with null id is zero")
-    void unreadCount_withNullId_isZero() {
-        assertThat(conversationService.unreadCount(null)).isZero();
+    private Conversation buildConversation(UUID buyer, UUID seller) {
+        return new Conversation.Builder()
+                .setId(conversationId)
+                .setBuyer(buildUser(buyer))
+                .setSeller(buildUser(seller))
+                .build();
     }
 }

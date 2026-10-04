@@ -1,17 +1,24 @@
 package za.ac.cput.prm_marketplace.controller;
 
-import za.ac.cput.prm_marketplace.domain.Report;
-import za.ac.cput.prm_marketplace.service.IReportService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import za.ac.cput.prm_marketplace.domain.Report;
+import za.ac.cput.prm_marketplace.domain.ReportStatus;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
+import za.ac.cput.prm_marketplace.service.IReportService;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Mounted under "/api" to match the rest of the application; the old "/reports" mapping sat outside
+ * the group the security rules are written against.
+ */
 @RestController
-@RequestMapping("/reports")
+@RequestMapping("/api/reports")
 public class ReportController {
 
     private final IReportService reportService;
@@ -20,52 +27,69 @@ public class ReportController {
         this.reportService = reportService;
     }
 
+    /**
+     * Files a report as the caller. The reporter and status used to come from the body, so a
+     * complaint could be filed in another person's name and pre-marked as resolved.
+     */
     @PostMapping
-    public ResponseEntity<Report> create(@RequestBody Report report) {
-        Report created = reportService.create(report);
+    public ResponseEntity<Report> create(@RequestBody Report report, Authentication authentication) {
+        Report created = reportService.create(report, CurrentCaller.id(authentication));
         if (created == null) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+        return new ResponseEntity<>(created, HttpStatus.CREATED);
+    }
+
+    /** The caller's own reports. The former "GET /reports" returned every report to every caller. */
+    @GetMapping
+    public ResponseEntity<List<Report>> getAll(Authentication authentication) {
+        return ResponseEntity.ok(reportService.getByReporter(CurrentCaller.id(authentication)));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Report> read(@PathVariable UUID id) {
-        Report report = reportService.read(id);
+    public ResponseEntity<Report> read(@PathVariable UUID id, Authentication authentication) {
+        Report report = reportService.read(id, CurrentCaller.id(authentication));
         if (report == null) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(report);
     }
 
-    @PutMapping
-    public ResponseEntity<Report> update(@RequestBody Report report) {
-        Report updated = reportService.update(report);
-        if (updated == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(updated);
-    }
-
+    /** Withdraws one of the caller's own reports. */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        boolean deleted = reportService.delete(id);
-        if (!deleted) {
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
+        if (!reportService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping
-    public ResponseEntity<List<Report>> getAll() {
-        return ResponseEntity.ok(reportService.getAll());
+    /**
+     * Moderator view of every report. Faculty only; for anyone else the service returns an empty
+     * list rather than the reports.
+     */
+    @GetMapping("/moderation/all")
+    public ResponseEntity<List<Report>> getAllForModeration(Authentication authentication) {
+        return ResponseEntity.ok(reportService.getAll(CurrentCaller.role(authentication)));
     }
 
-    @GetMapping("/reporter/{reporterId}")
-    public ResponseEntity<Report> findByReporterId(@PathVariable UUID reporterId) {
-        Optional<Report> report = reportService.findByReporterId(reporterId);
-        return report
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    @GetMapping("/moderation/status/{status}")
+    public ResponseEntity<List<Report>> getByStatus(@PathVariable ReportStatus status,
+                                                    Authentication authentication) {
+        return ResponseEntity.ok(reportService.getByStatus(status, CurrentCaller.role(authentication)));
+    }
+
+    /** Moderator decision on a report. */
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<Report> resolve(@PathVariable UUID id,
+                                          @RequestParam ReportStatus status,
+                                          @RequestParam(required = false) String notes,
+                                          Authentication authentication) {
+        Report updated = reportService.resolve(id, status, notes,
+                CurrentCaller.id(authentication), CurrentCaller.role(authentication));
+        if (updated == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(updated);
     }
 }

@@ -5,15 +5,18 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.security.UserPrincipal;
 import za.ac.cput.prm_marketplace.service.IOrderService;
 
 import java.math.BigDecimal;
@@ -26,6 +29,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -34,8 +38,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(OrderController.class)
-@AutoConfigureMockMvc(addFilters = false)
+/**
+ * The controller must take the acting user from the validated token and never from the request.
+ * Several of these tests exist purely to prove that: an order id in the path is a lookup key, not
+ * a permission, and a buyer id in a query string is not proof of ownership.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
 class OrderControllerTest {
 
     @Autowired
@@ -51,11 +60,45 @@ class OrderControllerTest {
     private UUID buyerId;
     private Order order;
 
+    /** A second account, used to prove one caller cannot reach the other's order. */
+    private UUID intruderId;
+
+    /** Identifies the caller for the request currently being built. */
+    private UUID callerId;
+
+    private Role callerRole = Role.STUDENT;
+
     @BeforeEach
     void setUp() {
         id = UUID.randomUUID();
         buyerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        callerId = buyerId;
+        callerRole = Role.STUDENT;
         order = buildOrder(OrderStatus.PENDING);
+    }
+
+    /**
+     * Builds a request post-processor that authenticates as the given account. The real filter
+     * chain then places the principal in the security context, which is what
+     * {@code @AuthenticationPrincipal} reads.
+     */
+    private RequestPostProcessor as(UUID userId, Role role) {
+        UserPrincipal principal = new UserPrincipal(
+                userId, userId + "@example.com", "hash", role, true);
+        return authentication(new UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
+    }
+
+    /** Authenticates as whoever {@link #callerId} currently names. */
+    private RequestPostProcessor asCaller() {
+        return as(callerId, callerRole);
+    }
+
+    /** Switches the acting account for subsequent requests in the same test. */
+    private void actAs(UUID userId, Role role) {
+        this.callerId = userId;
+        this.callerRole = role;
     }
 
     private Order buildOrder(OrderStatus orderStatus) {
@@ -73,112 +116,160 @@ class OrderControllerTest {
     }
 
     @Test
-    @DisplayName("create returns 201 with the order")
+    @DisplayName("create checks out the caller's cart and returns 201")
     void create_returnsCreated() throws Exception {
-        when(orderService.create(any(Order.class))).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any())).thenReturn(order);
 
-        mockMvc.perform(post("/api/orders")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(order)))
+        mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("PENDING"));
     }
 
     @Test
+    @DisplayName("create takes the buyer from the token, not from the request")
+    void create_usesCallerFromToken() throws Exception {
+        when(orderService.checkout(eq(buyerId), any())).thenReturn(order);
+
+        mockMvc.perform(post("/api/orders").with(asCaller()))
+                .andExpect(status().isCreated());
+
+        verify(orderService).checkout(eq(buyerId), any());
+    }
+
+    @Test
     @DisplayName("create returns 400 when the service refuses")
     void create_returnsBadRequest() throws Exception {
-        when(orderService.create(any(Order.class))).thenReturn(null);
+        when(orderService.checkout(eq(buyerId), any())).thenReturn(null);
 
-        mockMvc.perform(post("/api/orders")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(order)))
+        mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("read returns the order")
-    void read_returnsOrder() throws Exception {
-        when(orderService.read(id)).thenReturn(order);
+    @DisplayName("checkout returns 201")
+    void checkout_returnsCreated() throws Exception {
+        UUID addressId = UUID.randomUUID();
+        when(orderService.checkout(buyerId, addressId)).thenReturn(order);
 
-        mockMvc.perform(get("/api/orders/{id}", id))
+        mockMvc.perform(post("/api/orders/checkout").param("shippingAddressId", addressId.toString()).with(asCaller()))
+                .andExpect(status().isCreated());
+
+        verify(orderService).checkout(buyerId, addressId);
+    }
+
+    @Test
+    @DisplayName("read returns the caller's own order")
+    void read_returnsOrder() throws Exception {
+        when(orderService.read(id, buyerId)).thenReturn(order);
+
+        mockMvc.perform(get("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id.toString()));
     }
 
     @Test
-    @DisplayName("read returns 404 for an unknown order")
+    @DisplayName("read returns 404 when the order is not the caller's")
     void read_returnsNotFound() throws Exception {
-        when(orderService.read(id)).thenReturn(null);
+        actAs(intruderId, Role.STUDENT);
+        when(orderService.read(id, intruderId)).thenReturn(null);
 
-        mockMvc.perform(get("/api/orders/{id}", id))
+        mockMvc.perform(get("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("update forces the path id onto the entity")
     void update_usesPathId() throws Exception {
-        when(orderService.read(id)).thenReturn(order);
-        when(orderService.update(any(Order.class))).thenReturn(order);
+        when(orderService.update(any(Order.class), eq(buyerId))).thenReturn(order);
 
         mockMvc.perform(put("/api/orders/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(order)))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(order)).with(asCaller()))
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderService).update(captor.capture());
+        verify(orderService).update(captor.capture(), eq(buyerId));
         assertThat(captor.getValue().getId()).isEqualTo(id);
     }
 
     @Test
-    @DisplayName("update returns 404 when the order is unknown")
+    @DisplayName("update returns 404 when the caller does not own the order")
     void update_returnsNotFound() throws Exception {
-        when(orderService.read(id)).thenReturn(null);
+        actAs(intruderId, Role.STUDENT);
+        when(orderService.update(any(Order.class), eq(intruderId))).thenReturn(null);
 
         mockMvc.perform(put("/api/orders/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(order)))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(order)).with(asCaller()))
                 .andExpect(status().isNotFound());
+    }
 
-        verify(orderService, never()).update(any());
+    @Test
+    @DisplayName("a body cannot set the order status or total")
+    void update_bodyCannotOverrideServerOwnedFields() throws Exception {
+        when(orderService.update(any(Order.class), eq(buyerId))).thenReturn(order);
+
+        mockMvc.perform(put("/api/orders/{id}", id)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"" + id + "\",\"status\":\"SHIPPED\",\"totalAmount\":0.01}").with(asCaller()))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
+        verify(orderService).update(captor.capture(), eq(buyerId));
+        assertThat(captor.getValue().getStatus())
+                .as("status is server-owned and must not survive binding")
+                .isNotEqualTo(OrderStatus.SHIPPED);
+        assertThat(captor.getValue().getTotalAmount()).isNull();
     }
 
     @Test
     @DisplayName("delete returns 204 on success")
     void delete_returnsNoContent() throws Exception {
-        when(orderService.delete(id)).thenReturn(true);
+        when(orderService.delete(id, buyerId)).thenReturn(true);
 
-        mockMvc.perform(delete("/api/orders/{id}", id))
+        mockMvc.perform(delete("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("delete returns 404 for an unknown order")
+    @DisplayName("delete returns 404 when the order is not the caller's")
     void delete_returnsNotFound() throws Exception {
-        when(orderService.delete(id)).thenReturn(false);
+        actAs(intruderId, Role.STUDENT);
+        when(orderService.delete(id, intruderId)).thenReturn(false);
 
-        mockMvc.perform(delete("/api/orders/{id}", id))
+        mockMvc.perform(delete("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("getAll returns every order")
+    @DisplayName("getAll is scoped to the caller")
     void getAll_returnsList() throws Exception {
-        when(orderService.getAll()).thenReturn(List.of(order));
+        when(orderService.getAll(buyerId)).thenReturn(List.of(order));
 
-        mockMvc.perform(get("/api/orders"))
+        mockMvc.perform(get("/api/orders").with(asCaller()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id.toString()));
+
+        verify(orderService).getAll(buyerId);
+    }
+
+    @Test
+    @DisplayName("getByBuyer returns the caller's orders")
+    void getByBuyer_returnsList() throws Exception {
+        when(orderService.getByBuyer(buyerId)).thenReturn(List.of(order));
+
+        mockMvc.perform(get("/api/orders/buyer/{buyerId}", buyerId).with(asCaller()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(id.toString()));
     }
 
     @Test
-    @DisplayName("getByBuyer returns the buyer's orders")
-    void getByBuyer_returnsList() throws Exception {
-        when(orderService.getByBuyer(buyerId)).thenReturn(List.of(order));
+    @DisplayName("getByBuyer refuses another user's id without asking the service")
+    void getByBuyer_rejectsOtherBuyer() throws Exception {
+        mockMvc.perform(get("/api/orders/buyer/{buyerId}", intruderId).with(asCaller()))
+                .andExpect(status().isNotFound());
 
-        mockMvc.perform(get("/api/orders/buyer/{buyerId}", buyerId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
+        verify(orderService, never()).getByBuyer(any());
     }
 
     @Test
@@ -186,7 +277,7 @@ class OrderControllerTest {
     void getByBuyerAndStatus_filters() throws Exception {
         when(orderService.getByBuyerAndStatus(buyerId, OrderStatus.SHIPPED)).thenReturn(List.of());
 
-        mockMvc.perform(get("/api/orders/buyer/{buyerId}/status/{status}", buyerId, "SHIPPED"))
+        mockMvc.perform(get("/api/orders/buyer/{buyerId}/status/{status}", buyerId, "SHIPPED").with(asCaller()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
 
@@ -194,40 +285,52 @@ class OrderControllerTest {
     }
 
     @Test
+    @DisplayName("getByBuyerAndStatus refuses another user's id")
+    void getByBuyerAndStatus_rejectsOtherBuyer() throws Exception {
+        mockMvc.perform(get("/api/orders/buyer/{buyerId}/status/{status}", intruderId, "SHIPPED").with(asCaller()))
+                .andExpect(status().isNotFound());
+
+        verify(orderService, never()).getByBuyerAndStatus(any(), any());
+    }
+
+    @Test
     @DisplayName("getByBuyerAndStatus rejects an unknown status with 400")
     void getByBuyerAndStatus_withInvalidStatus_returnsBadRequest() throws Exception {
-        mockMvc.perform(get("/api/orders/buyer/{buyerId}/status/{status}", buyerId, "NOT_A_STATUS"))
+        mockMvc.perform(get("/api/orders/buyer/{buyerId}/status/{status}", buyerId, "NOT_A_STATUS").with(asCaller()))
                 .andExpect(status().isBadRequest());
     }
 
-    @Test
-    @DisplayName("updateStatus applies the requested status")
+@Test
+    @DisplayName("updateStatus passes the caller's id and role to the service")
     void updateStatus_appliesStatus() throws Exception {
+        actAs(buyerId, Role.VENDOR);
         Order shipped = buildOrder(OrderStatus.SHIPPED);
-        when(orderService.updateStatus(id, OrderStatus.SHIPPED)).thenReturn(shipped);
+        when(orderService.updateStatus(id, OrderStatus.SHIPPED, buyerId, Role.VENDOR)).thenReturn(shipped);
 
         mockMvc.perform(patch("/api/orders/{id}/status", id)
-                        .param("status", "SHIPPED"))
+                        .param("status", "SHIPPED").with(asCaller()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SHIPPED"));
 
-        verify(orderService).updateStatus(id, OrderStatus.SHIPPED);
+        // The id matters as much as the role: without it the service cannot tell whose order this
+        // is, which is how any vendor ended up able to advance any other vendor's order.
+        verify(orderService).updateStatus(id, OrderStatus.SHIPPED, buyerId, Role.VENDOR);
     }
 
     @Test
-    @DisplayName("updateStatus returns 404 for an unknown order")
+    @DisplayName("updateStatus returns 404 when the service refuses")
     void updateStatus_returnsNotFound() throws Exception {
-        when(orderService.updateStatus(id, OrderStatus.SHIPPED)).thenReturn(null);
+        when(orderService.updateStatus(id, OrderStatus.SHIPPED, buyerId, Role.STUDENT)).thenReturn(null);
 
         mockMvc.perform(patch("/api/orders/{id}/status", id)
-                        .param("status", "SHIPPED"))
+                        .param("status", "SHIPPED").with(asCaller()))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("updateStatus requires the status parameter")
     void updateStatus_withoutStatus_returnsBadRequest() throws Exception {
-        mockMvc.perform(patch("/api/orders/{id}/status", id))
+        mockMvc.perform(patch("/api/orders/{id}/status", id).with(asCaller()))
                 .andExpect(status().isBadRequest());
     }
 
@@ -236,8 +339,7 @@ class OrderControllerTest {
     void cancel_returnsNoContent() throws Exception {
         when(orderService.cancel(id, buyerId)).thenReturn(true);
 
-        mockMvc.perform(patch("/api/orders/{id}/cancel", id)
-                        .param("buyerId", buyerId.toString()))
+        mockMvc.perform(patch("/api/orders/{id}/cancel", id).with(asCaller()))
                 .andExpect(status().isNoContent());
     }
 
@@ -246,24 +348,40 @@ class OrderControllerTest {
     void cancel_returnsBadRequest() throws Exception {
         when(orderService.cancel(id, buyerId)).thenReturn(false);
 
-        mockMvc.perform(patch("/api/orders/{id}/cancel", id)
-                        .param("buyerId", buyerId.toString()))
+        mockMvc.perform(patch("/api/orders/{id}/cancel", id).with(asCaller()))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("cancel requires the buyerId parameter")
-    void cancel_withoutBuyerId_returnsBadRequest() throws Exception {
-        mockMvc.perform(patch("/api/orders/{id}/cancel", id))
+    @DisplayName("cancel takes the buyer from the token and ignores a buyerId parameter")
+    void cancel_ignoresBuyerIdParameter() throws Exception {
+        when(orderService.cancel(id, buyerId)).thenReturn(true);
+
+        // The old endpoint accepted ?buyerId= and trusted it, so anybody could cancel anybody's
+        // order by passing the victim's id.
+        mockMvc.perform(patch("/api/orders/{id}/cancel", id)
+                        .param("buyerId", intruderId.toString()).with(asCaller()))
+                .andExpect(status().isNoContent());
+
+        verify(orderService).cancel(id, buyerId);
+    }
+
+    @Test
+    @DisplayName("cancel returns 400 when another user tries to cancel the order")
+    void cancel_rejectsOtherBuyer() throws Exception {
+        actAs(intruderId, Role.STUDENT);
+        when(orderService.cancel(id, intruderId)).thenReturn(false);
+
+        mockMvc.perform(patch("/api/orders/{id}/cancel", id).with(asCaller()))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("an order never leaks the buyer's password hash")
     void order_doesNotLeakPasswordHash() throws Exception {
-        when(orderService.read(id)).thenReturn(order);
+        when(orderService.read(id, buyerId)).thenReturn(order);
 
-        String body = mockMvc.perform(get("/api/orders/{id}", id))
+        String body = mockMvc.perform(get("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 

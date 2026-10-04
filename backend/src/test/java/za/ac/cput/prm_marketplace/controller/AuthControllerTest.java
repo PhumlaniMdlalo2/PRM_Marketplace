@@ -3,34 +3,50 @@ package za.ac.cput.prm_marketplace.controller;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.dto.AuthResponse;
 import za.ac.cput.prm_marketplace.dto.UserResponse;
 import za.ac.cput.prm_marketplace.exception.BadRequestException;
 import za.ac.cput.prm_marketplace.exception.ConflictException;
 import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
+import za.ac.cput.prm_marketplace.security.UserPrincipal;
 import za.ac.cput.prm_marketplace.service.IAuthService;
 
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(AuthController.class)
-@AutoConfigureMockMvc(addFilters = false)
+/**
+ * A full context, with the filter chain running, unlike the web slices used elsewhere.
+ *
+ * <p>Most of this controller is public, which is why it used to run with filters disabled. But
+ * {@code /change-password} is not public, and its whole point is that the account comes from the
+ * token rather than a request parameter. With no filter chain there is no token, so the test could
+ * not tell the two designs apart — it would have passed just as happily against the old,
+ * email-from-the-query-string version.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
 class AuthControllerTest {
 
     @Autowired
@@ -189,17 +205,46 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("changePassword: returns 200 and delegates")
+    @DisplayName("changePassword: identifies the account from the token, not a request parameter")
     void changePassword_returnsOk() throws Exception {
-        doNothing().when(authService).changePassword(anyString(), anyString(), anyString());
+        UUID callerId = UUID.randomUUID();
+        doNothing().when(authService).changePassword(any(), anyString(), anyString());
 
         mockMvc.perform(post("/api/auth/change-password")
-                        .param("email", "jane@example.com")
                         .param("currentPassword", "old")
-                        .param("newPassword", "brandNew123"))
+                        .param("newPassword", "brandNew123")
+                        .with(as(callerId)))
                 .andExpect(status().isOk());
 
-        verify(authService).changePassword("jane@example.com", "old", "brandNew123");
+        // The account came off the token. An email parameter would have let any authenticated
+        // caller point this at a different account.
+        verify(authService).changePassword(callerId, "old", "brandNew123");
+    }
+
+    @Test
+    @DisplayName("changePassword: an email parameter is ignored, not honoured")
+    void changePassword_ignoresSuppliedEmail() throws Exception {
+        UUID callerId = UUID.randomUUID();
+        UUID victimId = UUID.randomUUID();
+        doNothing().when(authService).changePassword(any(), anyString(), anyString());
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .param("email", "victim@example.com")
+                        .param("currentPassword", "old")
+                        .param("newPassword", "brandNew123")
+                        .with(as(callerId)))
+                .andExpect(status().isOk());
+
+        verify(authService).changePassword(callerId, "old", "brandNew123");
+        verify(authService, never()).changePassword(eq(victimId), anyString(), anyString());
+    }
+
+    /** Authenticates the request as the given account. */
+    private RequestPostProcessor as(UUID userId) {
+        UserPrincipal principal = new UserPrincipal(
+                userId, userId + "@example.com", "hash", Role.STUDENT, true);
+        return authentication(new UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
     }
 
     @Test

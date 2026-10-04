@@ -1,10 +1,11 @@
 package za.ac.cput.prm_marketplace.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.SavedItem;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.ISavedItemService;
 
 import java.util.List;
@@ -21,69 +22,53 @@ public class SavedItemController {
         this.savedItemService = savedItemService;
     }
 
-    @PostMapping
-    public ResponseEntity<SavedItem> create(@RequestBody SavedItem savedItem) {
-        SavedItem created = savedItemService.create(savedItem);
-        if (created == null) {
-            return ResponseEntity.badRequest().build();
-        }
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
+    /**
+     * The caller's saved items. This replaces the old "/user/{userId}" route and the bare
+     * "GET /api/saved-items", which returned every user's saved list.
+     */
+    @GetMapping
+    public ResponseEntity<List<SavedItem>> getAll(Authentication authentication) {
+        return ResponseEntity.ok(savedItemService.getByUser(CurrentCaller.id(authentication)));
+    }
+
+    @GetMapping("/count")
+    public ResponseEntity<Long> countByUser(Authentication authentication) {
+        return ResponseEntity.ok(savedItemService.countByUser(CurrentCaller.id(authentication)));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<SavedItem> read(@PathVariable UUID id) {
-        SavedItem savedItem = savedItemService.read(id);
+    public ResponseEntity<SavedItem> read(@PathVariable UUID id, Authentication authentication) {
+        SavedItem savedItem = savedItemService.read(id, CurrentCaller.id(authentication));
         if (savedItem == null) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(savedItem);
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<SavedItem> update(@PathVariable UUID id, @RequestBody SavedItem savedItem) {
-        SavedItem existing = savedItemService.read(id);
-        if (existing == null) {
-            return ResponseEntity.notFound().build();
-        }
-        SavedItem toUpdate = new SavedItem.Builder().copy(savedItem).setId(id).build();
-        return ResponseEntity.ok(savedItemService.update(toUpdate));
-    }
-
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        if (!savedItemService.delete(id)) {
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
+        if (!savedItemService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping
-    public ResponseEntity<List<SavedItem>> getAll() {
-        return ResponseEntity.ok(savedItemService.getAll());
-    }
-
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<List<SavedItem>> getByUser(@PathVariable UUID userId) {
-        return ResponseEntity.ok(savedItemService.getByUser(userId));
-    }
-
-    @GetMapping("/user/{userId}/count")
-    public ResponseEntity<Long> countByUser(@PathVariable UUID userId) {
-        return ResponseEntity.ok(savedItemService.countByUser(userId));
-    }
-
-    @PostMapping("/user/{userId}/product/{productId}/toggle")
-    public ResponseEntity<SavedItem> toggle(@PathVariable UUID userId, @PathVariable UUID productId) {
-        SavedItem result = savedItemService.toggle(userId, productId);
+    /**
+     * Saves or unsaves a product on the caller's own list. The userId segment is gone: it was read
+     * from the path, so one account could save and unsave items on any other account's list.
+     */
+    @PostMapping("/product/{productId}/toggle")
+    public ResponseEntity<SavedItem> toggle(@PathVariable UUID productId, Authentication authentication) {
+        SavedItem result = savedItemService.toggle(CurrentCaller.id(authentication), productId);
         return result == null
                 ? ResponseEntity.noContent().build()
                 : ResponseEntity.ok(result);
     }
 
-    @DeleteMapping("/user/{userId}/product/{productId}")
-    public ResponseEntity<Void> removeByUserAndProduct(@PathVariable UUID userId,
-                                                       @PathVariable UUID productId) {
-        if (!savedItemService.removeByUserAndProduct(userId, productId)) {
+    @DeleteMapping("/product/{productId}")
+    public ResponseEntity<Void> removeByUserAndProduct(@PathVariable UUID productId,
+                                                       Authentication authentication) {
+        if (!savedItemService.removeByUserAndProduct(CurrentCaller.id(authentication), productId)) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();

@@ -29,7 +29,10 @@
     <properties>
         <java.version>21</java.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <springdoc.version>2.6.0</springdoc.version>
+        <!-- Spring Boot 4 requires the springdoc 3.x line. 2.x is built against Spring Framework 6
+             and fails at runtime with NoSuchMethodError on ControllerAdviceBean, which broke
+             /v3/api-docs and Swagger UI entirely. -->
+        <springdoc.version>3.1.1</springdoc.version>
     </properties>
     <dependencies>
         <dependency>
@@ -109,6 +112,14 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Tests run against an in-memory database so the build does not depend on a
+             developer having MySQL installed and listening on localhost. The tests that
+             genuinely need MySQL-specific DDL opt back in via @EnabledIfEnvironmentVariable. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
 <dependency>
 <groupId>org.springframework.boot</groupId>
 <artifactId>spring-boot-starter-webmvc-test</artifactId>
@@ -136,6 +147,21 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- Activates the "test" profile for the whole suite so that
+                             src/test/resources/application-test.properties is layered on top of the
+                             real application.properties. The profile cannot be activated from a
+                             test-side application.properties, because only one file with that
+                             name may exist on the classpath and the test copy would shadow the
+                             real one, hiding properties such as spring.mail.host. -->
+                        <spring.profiles.active>test</spring.profiles.active>
+                    </systemPropertyVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>

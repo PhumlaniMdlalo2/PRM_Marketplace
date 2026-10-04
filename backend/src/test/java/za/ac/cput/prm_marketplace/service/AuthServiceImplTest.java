@@ -342,12 +342,13 @@ class AuthServiceImplTest {
     @DisplayName("changePassword: replaces the password when the current one matches")
     void changePassword_correctCurrentPassword_updates() {
         stubSharedDependencies();
+        UUID callerId = UUID.randomUUID();
         User user = buildUser("jane@example.com", true);
-        when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("stored-hash", "stored-hash")).thenReturn(true);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        authService.changePassword("jane@example.com", "stored-hash", "brandNew123");
+        authService.changePassword(callerId, "stored-hash", "brandNew123");
 
         assertEquals("encoded-hash", user.getPasswordHash());
     }
@@ -355,12 +356,58 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("changePassword: rejects a wrong current password with unauthorized")
     void changePassword_wrongCurrentPassword_throwsUnauthorized() {
+        UUID callerId = UUID.randomUUID();
         User user = buildUser("jane@example.com", true);
-        when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("wrong", "stored-hash")).thenReturn(false);
 
         assertThrows(UnauthorizedException.class,
-                () -> authService.changePassword("jane@example.com", "wrong", "brandNew123"));
+                () -> authService.changePassword(callerId, "wrong", "brandNew123"));
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("changePassword: an unknown account fails exactly like a wrong password")
+    void changePassword_unknownAccount_doesNotRevealItself() {
+        UUID callerId = UUID.randomUUID();
+        when(userRepository.findById(callerId)).thenReturn(Optional.empty());
+
+        // The message matches the wrong-password case on purpose. Telling the two apart told an
+        // attacker which email addresses were registered.
+        UnauthorizedException thrown = assertThrows(UnauthorizedException.class,
+                () -> authService.changePassword(callerId, "stored-hash", "brandNew123"));
+        assertEquals("Current password is incorrect", thrown.getMessage());
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    @DisplayName("register: refuses to grant faculty, which supervises every order")
+    void register_rejectsFacultySelfService() {
+        stubSharedDependencies();
+        when(userRepository.existsByEmail("sneaky@example.com")).thenReturn(false);
+
+        BadRequestException thrown = assertThrows(BadRequestException.class,
+                () -> authService.register(new RegisterRequest(
+                        "Sneaky", "sneaky@example.com", "password123", Role.FACULTY, null)));
+
+        assertTrue(thrown.getMessage().contains("FACULTY"));
+        // Fails closed: the account is never written, so there is nothing to escalate into.
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("register: still honours the self-service vendor role")
+    void register_allowsVendorSelfService() {
+        stubSharedDependencies();
+        when(userRepository.existsByEmail("seller@example.com")).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        AuthResponse response = authService.register(new RegisterRequest(
+                "Seller", "seller@example.com", "password123", Role.VENDOR, null));
+
+        assertNotNull(response);
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertEquals(Role.VENDOR, captor.getValue().getRole());
     }
 }

@@ -3,9 +3,10 @@ package za.ac.cput.prm_marketplace.controller;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -20,6 +21,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,9 +31,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(CommentController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class CommentControllerTest {
 
     @Autowired
@@ -43,240 +46,190 @@ class CommentControllerTest {
     @MockitoBean
     private ICommentService commentService;
 
-    private UUID id;
-    private UUID postId;
     private UUID authorId;
+    private UUID intruderId;
+    private UUID postId;
+    private UUID commentId;
+    private BulletinPost post;
     private Comment comment;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
-        postId = UUID.randomUUID();
         authorId = UUID.randomUUID();
-        comment = buildComment();
-    }
-
-    private User buildUser(UUID userId) {
-        return new User.Builder()
-                .setId(userId)
-                .setName("Commenter")
-                .setEmail("commenter@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
-
-    private BulletinPost buildPost() {
-        return new BulletinPost.Builder()
+        intruderId = UUID.randomUUID();
+        postId = UUID.randomUUID();
+        commentId = UUID.randomUUID();
+        post = new BulletinPost.Builder()
                 .setId(postId)
-                .setAuthor(buildUser(UUID.randomUUID()))
-                .setTitle("Selling a desk")
-                .setBody("Desk in good condition")
+                .setAuthor(buildUser(intruderId))
+                .setTitle("Water outage")
+                .setBody("Supply is interrupted.")
                 .build();
-    }
-
-    private Comment buildComment() {
-        return new Comment.Builder()
-                .setId(id)
-                .setPost(buildPost())
+        comment = new Comment.Builder()
+                .setId(commentId)
+                .setPost(post)
                 .setAuthor(buildUser(authorId))
-                .setBody("Is the desk still available?")
+                .setBody("Any update on this?")
                 .build();
     }
 
     @Test
-    @DisplayName("create returns 201 with the comment")
-    void create_returnsCreated() throws Exception {
-        when(commentService.create(any(Comment.class))).thenReturn(comment);
+    @DisplayName("posting a comment files it under the caller, not the author in the body")
+    void create_takesTheAuthorFromTheToken() throws Exception {
+        when(commentService.create(any(), eq(authorId))).thenReturn(comment);
+
+        // The body claims a different author and carries its own id. Neither may be trusted.
+        Comment hostile = new Comment.Builder()
+                .copy(comment)
+                .setId(UUID.randomUUID())
+                .setAuthor(buildUser(intruderId))
+                .build();
 
         mockMvc.perform(post("/api/comments")
+                        .with(asStudent(authorId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(comment)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(id.toString()))
-                .andExpect(jsonPath("$.body").value("Is the desk still available?"));
+                        .content(objectMapper.writeValueAsString(hostile)))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<Comment> captor = ArgumentCaptor.forClass(Comment.class);
+        verify(commentService).create(captor.capture(), eq(authorId));
+        assertThat(captor.getValue().getBody()).isEqualTo("Any update on this?");
     }
 
     @Test
-    @DisplayName("create returns 400 when the service refuses")
-    void create_returnsBadRequest() throws Exception {
-        when(commentService.create(any(Comment.class))).thenReturn(null);
+    @DisplayName("posting a comment returns 400 when it cannot be saved")
+    void create_returnsBadRequestWhenServiceReturnsNull() throws Exception {
+        when(commentService.create(any(), eq(authorId))).thenReturn(null);
 
         mockMvc.perform(post("/api/comments")
+                        .with(asStudent(authorId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(comment)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("create accepts a parent comment in the request body")
-    void create_acceptsParent() throws Exception {
-        when(commentService.create(any(Comment.class))).thenReturn(comment);
+    @DisplayName("the comment list for a post is served from the /api prefix")
+    void getByPost_usesTheApiPrefix() throws Exception {
+        when(commentService.getByPost(postId)).thenReturn(List.of(comment));
 
-        String body = "{\"id\":\"" + id + "\",\"body\":\"Reply\","
-                + "\"parent\":{\"id\":\"" + UUID.randomUUID() + "\",\"body\":\"Root\"}}";
-
-        mockMvc.perform(post("/api/comments")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isCreated());
-
-        org.mockito.ArgumentCaptor<Comment> captor = org.mockito.ArgumentCaptor.forClass(Comment.class);
-        verify(commentService).create(captor.capture());
-        assertThat(captor.getValue().getParent()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("the parent comment is not echoed back in the response")
-    void create_doesNotEchoParent() throws Exception {
-        Comment reply = new Comment.Builder()
-                .setId(id)
-                .setPost(buildPost())
-                .setAuthor(buildUser(authorId))
-                .setParent(buildComment())
-                .setBody("Reply")
-                .build();
-        when(commentService.create(any(Comment.class))).thenReturn(reply);
-
-        String body = mockMvc.perform(post("/api/comments")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reply)))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("\"parent\"");
-    }
-
-    @Test
-    @DisplayName("read returns the comment")
-    void read_returnsComment() throws Exception {
-        when(commentService.read(id)).thenReturn(comment);
-
-        mockMvc.perform(get("/api/comments/{id}", id))
+        mockMvc.perform(get("/api/comments/post/" + postId).with(asStudent(authorId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
+                .andExpect(jsonPath("$[0].id").value(commentId.toString()));
 
-    @Test
-    @DisplayName("read returns 404 for an unknown comment")
-    void read_returnsNotFound() throws Exception {
-        when(commentService.read(id)).thenReturn(null);
-
-        mockMvc.perform(get("/api/comments/{id}", id))
+        mockMvc.perform(get("/comments/post/" + postId).with(asStudent(authorId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("update returns 200 on success")
-    void update_returnsOk() throws Exception {
-        when(commentService.read(id)).thenReturn(comment);
-        when(commentService.update(any(Comment.class))).thenReturn(comment);
-
-        mockMvc.perform(put("/api/comments/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(comment)))
-                .andExpect(status().isOk());
+    @DisplayName("there is no listing of comments across every post")
+    void getAll_isNotAvailable() throws Exception {
+        // The path exists for posting, so the router answers 405 rather than 404. Either way the
+        // caller cannot reach an unscoped comment list.
+        mockMvc.perform(get("/api/comments").with(asStudent(authorId)))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
-    @DisplayName("update returns 404 for an unknown comment")
-    void update_returnsNotFound() throws Exception {
-        when(commentService.read(id)).thenReturn(null);
+    @DisplayName("top-level comments and replies are listed separately")
+    void threadViews_areAvailable() throws Exception {
+        when(commentService.getTopLevelByPost(postId)).thenReturn(List.of(comment));
+        when(commentService.getReplies(postId, commentId)).thenReturn(List.of());
 
-        mockMvc.perform(put("/api/comments/{id}", id)
+        mockMvc.perform(get("/api/comments/post/" + postId + "/top-level").with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(commentId.toString()));
+
+        mockMvc.perform(get("/api/comments/post/" + postId + "/replies/" + commentId)
+                        .with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    @DisplayName("the comment count for a post is available")
+    void countByPost_returnsTheCount() throws Exception {
+        when(commentService.countByPost(postId)).thenReturn(7L);
+
+        mockMvc.perform(get("/api/comments/post/" + postId + "/count").with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").value(7));
+    }
+
+    @Test
+    @DisplayName("reading a comment that does not exist returns 404")
+    void read_returnsNotFoundWhenMissing() throws Exception {
+        when(commentService.read(commentId)).thenReturn(null);
+
+        mockMvc.perform(get("/api/comments/" + commentId).with(asStudent(authorId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("updating a comment that is not the caller's returns 404")
+    void update_returnsNotFoundForAnotherAuthorsComment() throws Exception {
+        when(commentService.update(any(), eq(authorId))).thenReturn(null);
+
+        mockMvc.perform(put("/api/comments/" + commentId)
+                        .with(asStudent(authorId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(comment)))
                 .andExpect(status().isNotFound());
 
-        verify(commentService, never()).update(any());
+        verify(commentService).update(any(), eq(authorId));
     }
 
     @Test
-    @DisplayName("delete returns 204 on success")
+    @DisplayName("updating the caller's own comment succeeds")
+    void update_returnsUpdatedComment() throws Exception {
+        when(commentService.update(any(), eq(authorId))).thenReturn(comment);
+
+        mockMvc.perform(put("/api/comments/" + commentId)
+                        .with(asStudent(authorId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(comment)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(commentId.toString()));
+    }
+
+    @Test
+    @DisplayName("deleting a comment that is not the caller's returns 404")
+    void delete_returnsNotFoundForAnotherAuthorsComment() throws Exception {
+        when(commentService.delete(commentId, authorId)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/comments/" + commentId).with(asStudent(authorId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("deleting the caller's own comment succeeds")
     void delete_returnsNoContent() throws Exception {
-        when(commentService.delete(id)).thenReturn(true);
+        when(commentService.delete(commentId, authorId)).thenReturn(true);
 
-        mockMvc.perform(delete("/api/comments/{id}", id))
+        mockMvc.perform(delete("/api/comments/" + commentId).with(asStudent(authorId)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("delete returns 404 for an unknown comment")
-    void delete_returnsNotFound() throws Exception {
-        when(commentService.delete(id)).thenReturn(false);
+    @DisplayName("comment writes require authentication")
+    void writeEndpointsRejectAnonymousCallers() throws Exception {
+        String body = objectMapper.writeValueAsString(comment);
 
-        mockMvc.perform(delete("/api/comments/{id}", id))
-                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/comments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(put("/api/comments/" + commentId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/comments/" + commentId))
+                .andExpect(status().isUnauthorized());
+
+        verify(commentService, never()).delete(any(), any());
     }
 
-    @Test
-    @DisplayName("getAll returns every comment")
-    void getAll_returnsList() throws Exception {
-        when(commentService.getAll()).thenReturn(List.of(comment));
-
-        mockMvc.perform(get("/api/comments"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getByPost returns the post's comments")
-    void getByPost_returnsList() throws Exception {
-        when(commentService.getByPost(postId)).thenReturn(List.of(comment));
-
-        mockMvc.perform(get("/api/comments/post/{postId}", postId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getTopLevelByPost returns only root comments")
-    void getTopLevelByPost_returnsList() throws Exception {
-        when(commentService.getTopLevelByPost(postId)).thenReturn(List.of(comment));
-
-        mockMvc.perform(get("/api/comments/post/{postId}/top-level", postId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getReplies returns the replies to a comment")
-    void getReplies_returnsList() throws Exception {
-        when(commentService.getReplies(postId, id)).thenReturn(List.of(comment));
-
-        mockMvc.perform(get("/api/comments/post/{postId}/replies/{parentId}", postId, id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getByAuthor returns the author's comments")
-    void getByAuthor_returnsList() throws Exception {
-        when(commentService.getByAuthor(authorId)).thenReturn(List.of(comment));
-
-        mockMvc.perform(get("/api/comments/author/{authorId}", authorId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("countByPost returns the comment total")
-    void countByPost_returnsNumber() throws Exception {
-        when(commentService.countByPost(postId)).thenReturn(11L);
-
-        mockMvc.perform(get("/api/comments/post/{postId}/count", postId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$").value(11));
-    }
-
-    @Test
-    @DisplayName("a comment never leaks the author's password hash")
-    void comment_doesNotLeakPasswordHash() throws Exception {
-        when(commentService.read(id)).thenReturn(comment);
-
-        String body = mockMvc.perform(get("/api/comments/{id}", id))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("passwordHash").doesNotContain("\"hash\"");
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }
 }

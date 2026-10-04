@@ -1,6 +1,7 @@
 package za.ac.cput.prm_marketplace.factory;
 
 import za.ac.cput.prm_marketplace.domain.Product;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -27,6 +28,7 @@ public class ProductFactory {
                 .price(price)
                 .category(category)
                 .stockQuantity(stockQuantity)
+                .vendor(new VendorProfile.Builder().setId(vendorId).build())
                 .build();
     }
 }

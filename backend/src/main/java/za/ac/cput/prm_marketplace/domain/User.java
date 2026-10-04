@@ -2,6 +2,7 @@ package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -77,6 +78,11 @@ public class User {
         return passwordHash;
     }
 
+    /**
+     * Server-owned. The role is decided by the registration and approval flow, so a request body
+     * that carries "role" must not be able to grant itself a faculty or vendor account.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public Role getRole() {
         return role;
     }
@@ -85,15 +91,31 @@ public class User {
         return phone;
     }
 
+    /** Server-owned, and {@code updatable = false}, so it must not be settable from a body either. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
 
+    /** Server-owned. Verification happens only through the emailed code. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean isVerified() {
         return verified;
     }
 
-    public VendorProfile getVendorProfile() {
+    /**
+     * The inverse side of the vendor-profile relationship, and the one half of the pair that is
+     * actually reachable from a user request body.
+     *
+     * <p>{@code VendorProfile.user} is already ignored, so without this the pair could still be
+     * assembled from a {@code POST} or {@code PUT} to the users routes: a caller could attach a
+     * profile to their own account and skip the ownership and verification rules that
+     * VendorProfileService enforces. Both directions are ignored for the same reason — neither is
+     * the way a client reads or writes a vendor profile. Profiles are served by
+     * VendorProfileController, and a user is created from a body with no profile in it.
+     */
+    @JsonIgnore
+public VendorProfile getVendorProfile() {
         return vendorProfile;
     }
 
@@ -101,6 +123,12 @@ public class User {
         return avatarUrl;
     }
 
+    /**
+     * Lazy collection. {@code spring.jpa.open-in-view} is false, so Jackson would try to
+     * initialise this after the transaction has closed and the endpoint would answer 500.
+     * Addresses are served by AddressController.
+     */
+    @JsonIgnore
     public List<Address> getAddresses() {
         return addresses;
     }
@@ -123,6 +151,8 @@ public class User {
         this.passwordHash = passwordHash;
     }
 
+    /** Walks the lazy collection, so it cannot be serialised either. */
+    @JsonIgnore
     public Address getDefaultAddress() {
         return addresses.stream()
                 .filter(Address::isDefaultAddress)
@@ -132,11 +162,12 @@ public class User {
 
     @Override
     public String toString() {
+        // The password hash is deliberately absent. This string reaches log statements and
+        // exception messages, and the original form leaked the credential into both.
         return "User{" +
                 "id=" + id +
                 ", name='" + name + '\'' +
                 ", email='" + email + '\'' +
-                ", passwordHash='" + passwordHash + '\'' +
                 ", role=" + role +
                 ", phone='" + phone + '\'' +
                 ", createdAt=" + createdAt +

@@ -4,23 +4,35 @@ import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
 @Table(name = "comments")
 public class Comment {
 
-    @Id
+    /**
+ * Stays writable on purpose. A reply names its parent as a nested object, so Jackson has to be
+ * able to read the parent's id out of the request. Mass assignment is handled in the service,
+ * which rebuilds the entity instead of copying the body, and it proves that in CommentServiceImplTest.
+ */
+@Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * The client names the post and, for a reply, the parent comment. Both are accepted on input
+     * and hidden from output so a comment listing does not drag in a whole post and a nested reply
+     * tree. The service re-reads both and rejects anything that does not exist or sits on another
+     * post, so trusting the incoming id here does not trust the client.
+     */
     @ManyToOne(optional = false)
     @JoinColumn(name = "post_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private BulletinPost post;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "author_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User author;
 
     @ManyToOne
@@ -31,7 +43,8 @@ public class Comment {
     @Column(nullable = false, length = 2000)
     private String body;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected Comment() {
@@ -84,12 +97,12 @@ public class Comment {
         if (this == o) return true;
         if (!(o instanceof Comment)) return false;
         Comment comment = (Comment) o;
-        return Objects.equals(id, comment.id);
+        return id != null && id.equals(comment.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

@@ -4,14 +4,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.ProductImage;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.service.IProductImageService;
 
 import java.util.List;
@@ -19,18 +20,24 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
 
-@WebMvcTest(ProductImageController.class)
-@AutoConfigureMockMvc(addFilters = false)
+/**
+ * The product is now named by the path rather than the body, and every write carries the caller.
+ * The regression tests here pin down what a client can no longer do: attach an image to a
+ * competitor's product, move an existing image onto another listing, or wipe another seller's
+ * gallery.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
 class ProductImageControllerTest {
 
     @Autowired
@@ -44,12 +51,16 @@ class ProductImageControllerTest {
 
     private UUID id;
     private UUID productId;
+    private UUID sellerId;
+    private UUID intruderId;
     private ProductImage image;
 
     @BeforeEach
     void setUp() {
         id = UUID.randomUUID();
         productId = UUID.randomUUID();
+        sellerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
         image = buildImage(true, 0);
     }
 
@@ -66,12 +77,16 @@ class ProductImageControllerTest {
                 .build();
     }
 
-    @Test
-    @DisplayName("create returns 201 with the image")
-    void create_returnsCreated() throws Exception {
-        when(productImageService.create(any(ProductImage.class))).thenReturn(image);
+    // create
 
-        mockMvc.perform(post("/api/product-images")
+    @Test
+    @DisplayName("a seller can attach an image to their own product")
+    void create_returnsCreated() throws Exception {
+        when(productImageService.create(eq(productId), any(ProductImage.class), eq(sellerId)))
+                .thenReturn(image);
+
+        mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .with(as(sellerId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(image)))
                 .andExpect(status().isCreated())
@@ -80,42 +95,48 @@ class ProductImageControllerTest {
     }
 
     @Test
-    @DisplayName("create returns 400 when the service refuses")
-    void create_returnsBadRequest() throws Exception {
-        when(productImageService.create(any(ProductImage.class))).thenReturn(null);
+    @DisplayName("attaching to a product the caller does not own reads as not found")
+    void create_somebodyElsesProduct_returnsNotFound() throws Exception {
+        when(productImageService.create(eq(productId), any(ProductImage.class), eq(intruderId)))
+                .thenReturn(null);
 
-        mockMvc.perform(post("/api/product-images")
+        mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .with(as(intruderId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(image)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("create accepts the owning product in the request body")
-    void create_acceptsNestedProduct() throws Exception {
-        when(productImageService.create(any(ProductImage.class))).thenReturn(image);
+    @DisplayName("a product named in the body does not override the one in the path")
+    void create_bodyProductCannotRedirectTheImage() throws Exception {
+        when(productImageService.create(eq(productId), any(ProductImage.class), eq(sellerId)))
+                .thenReturn(image);
 
-        String body = "{\"id\":\"" + id + "\",\"imageUrl\":\"https://cdn.example.com/book.jpg\","
-                + "\"product\":{\"id\":\"" + productId + "\",\"name\":\"Textbook\"}}";
+        UUID decoyProductId = UUID.randomUUID();
+        String body = """
+                {"imageUrl": "https://cdn.example.com/book.jpg",
+                 "product": {"id": "%s", "name": "Competitor"}}
+                """.formatted(decoyProductId);
 
-        mockMvc.perform(post("/api/product-images")
+        mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .with(as(sellerId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated());
 
-        org.mockito.ArgumentCaptor<ProductImage> captor =
-                org.mockito.ArgumentCaptor.forClass(ProductImage.class);
-        verify(productImageService).create(captor.capture());
-        assertThat(captor.getValue().getProduct()).isNotNull();
-        assertThat(captor.getValue().getProduct().getId()).isEqualTo(productId);
+        // The service is told which product to use, so the body's association is never trusted.
+        verify(productImageService).create(eq(productId), any(ProductImage.class), eq(sellerId));
     }
 
     @Test
     @DisplayName("the owning product is not echoed back in the response")
     void create_doesNotEchoProduct() throws Exception {
-        when(productImageService.create(any(ProductImage.class))).thenReturn(image);
+        when(productImageService.create(eq(productId), any(ProductImage.class), eq(sellerId)))
+                .thenReturn(image);
 
-        String body = mockMvc.perform(post("/api/product-images")
+        String body = mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .with(as(sellerId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(image)))
                 .andExpect(status().isCreated())
@@ -123,6 +144,54 @@ class ProductImageControllerTest {
 
         assertThat(body).doesNotContain("\"product\"");
     }
+
+    @Test
+    @DisplayName("a client cannot backdate an image")
+    void create_createdAtIsStrippedFromTheBody() throws Exception {
+        when(productImageService.create(eq(productId), any(ProductImage.class), eq(sellerId)))
+                .thenReturn(image);
+
+        String hostile = """
+                {"imageUrl": "https://cdn.example.com/book.jpg", "createdAt": "2000-01-01T00:00:00"}
+                """;
+
+        mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(hostile))
+                .andExpect(status().isCreated());
+
+        org.mockito.ArgumentCaptor<ProductImage> captor =
+                org.mockito.ArgumentCaptor.forClass(ProductImage.class);
+        verify(productImageService).create(eq(productId), captor.capture(), eq(sellerId));
+
+        assertThat(captor.getValue().getCreatedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("the old body-only create route no longer exists")
+    void createWithoutAProductRouteIsNotAvailable() throws Exception {
+        mockMvc.perform(post("/api/product-images")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(image)))
+                .andExpect(status().isNotFound());
+
+        verifyNoInteractions(productImageService);
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot attach an image")
+    void create_rejectsAnonymous() throws Exception {
+        mockMvc.perform(post("/api/product-images/product/{productId}", productId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(image)))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(productImageService);
+    }
+
+    // read
 
     @Test
     @DisplayName("read returns the image")
@@ -143,58 +212,89 @@ class ProductImageControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // update
+
     @Test
-    @DisplayName("update returns 200 on success")
+    @DisplayName("a seller can edit an image on their own product")
     void update_returnsOk() throws Exception {
-        when(productImageService.read(id)).thenReturn(image);
-        when(productImageService.update(any(ProductImage.class))).thenReturn(image);
+        when(productImageService.update(eq(id), any(ProductImage.class), eq(sellerId)))
+                .thenReturn(image);
 
         mockMvc.perform(put("/api/product-images/{id}", id)
+                        .with(as(sellerId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(image)))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @DisplayName("update returns 404 for an unknown image")
-    void update_returnsNotFound() throws Exception {
-        when(productImageService.read(id)).thenReturn(null);
+    @DisplayName("editing an image on somebody else's product reads as not found")
+    void update_somebodyElsesImage_returnsNotFound() throws Exception {
+        when(productImageService.update(eq(id), any(ProductImage.class), eq(intruderId)))
+                .thenReturn(null);
 
         mockMvc.perform(put("/api/product-images/{id}", id)
+                        .with(as(intruderId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(image)))
                 .andExpect(status().isNotFound());
-
-        verify(productImageService, never()).update(any());
     }
 
     @Test
-    @DisplayName("delete returns 204 on success")
-    void delete_returnsNoContent() throws Exception {
-        when(productImageService.delete(id)).thenReturn(true);
+    @DisplayName("an anonymous caller cannot edit an image")
+    void update_rejectsAnonymous() throws Exception {
+        mockMvc.perform(put("/api/product-images/{id}", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(image)))
+                .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(delete("/api/product-images/{id}", id))
+        verifyNoInteractions(productImageService);
+    }
+
+    // delete
+
+    @Test
+    @DisplayName("a seller can remove an image from their own product")
+    void delete_returnsNoContent() throws Exception {
+        when(productImageService.delete(id, sellerId)).thenReturn(true);
+
+        mockMvc.perform(delete("/api/product-images/{id}", id).with(as(sellerId, Role.VENDOR)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("delete returns 404 for an unknown image")
-    void delete_returnsNotFound() throws Exception {
-        when(productImageService.delete(id)).thenReturn(false);
+    @DisplayName("removing an image on somebody else's product reads as not found")
+    void delete_somebodyElsesImage_returnsNotFound() throws Exception {
+        when(productImageService.delete(id, intruderId)).thenReturn(false);
 
-        mockMvc.perform(delete("/api/product-images/{id}", id))
+        mockMvc.perform(delete("/api/product-images/{id}", id).with(as(intruderId, Role.VENDOR)))
                 .andExpect(status().isNotFound());
+
+        // The caller's own id is what reaches the service, so the refusal is the service's.
+        verify(productImageService).delete(id, intruderId);
     }
 
     @Test
-    @DisplayName("getAll returns every image")
-    void getAll_returnsList() throws Exception {
-        when(productImageService.getAll()).thenReturn(List.of(image));
+    @DisplayName("an anonymous caller cannot remove an image")
+    void delete_rejectsAnonymous() throws Exception {
+        mockMvc.perform(delete("/api/product-images/{id}", id))
+                .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(get("/api/product-images"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
+        verifyNoInteractions(productImageService);
     }
+
+    // getAll
+
+    @Test
+    @DisplayName("the bare GET no longer returns every seller's photography")
+    void getAllIsNotAvailable() throws Exception {
+        mockMvc.perform(get("/api/product-images"))
+                .andExpect(status().isNotFound());
+
+        verifyNoInteractions(productImageService);
+    }
+
+    // getByProduct / getPrimary
 
     @Test
     @DisplayName("getByProduct returns the product's images in order")
@@ -225,21 +325,36 @@ class ProductImageControllerTest {
                 .andExpect(status().isNotFound());
     }
 
-    @Test
-    @DisplayName("deleteByProduct clears every image of a product")
-    void deleteByProduct_returnsNoContent() throws Exception {
-        when(productImageService.deleteByProduct(productId)).thenReturn(true);
+    // deleteByProduct
 
-        mockMvc.perform(delete("/api/product-images/product/{productId}", productId))
+    @Test
+    @DisplayName("a seller can clear the gallery on their own product")
+    void deleteByProduct_returnsNoContent() throws Exception {
+        when(productImageService.deleteByProduct(productId, sellerId)).thenReturn(true);
+
+        mockMvc.perform(delete("/api/product-images/product/{productId}", productId)
+                        .with(as(sellerId, Role.VENDOR)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("deleteByProduct returns 404 when the service refuses")
-    void deleteByProduct_returnsNotFound() throws Exception {
-        when(productImageService.deleteByProduct(productId)).thenReturn(false);
+    @DisplayName("clearing somebody else's gallery reads as not found")
+    void deleteByProduct_somebodyElsesProduct_returnsNotFound() throws Exception {
+        when(productImageService.deleteByProduct(productId, intruderId)).thenReturn(false);
 
-        mockMvc.perform(delete("/api/product-images/product/{productId}", productId))
+        mockMvc.perform(delete("/api/product-images/product/{productId}", productId)
+                        .with(as(intruderId, Role.VENDOR)))
                 .andExpect(status().isNotFound());
+
+        verify(productImageService).deleteByProduct(productId, intruderId);
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot clear a gallery")
+    void deleteByProduct_rejectsAnonymous() throws Exception {
+        mockMvc.perform(delete("/api/product-images/product/{productId}", productId))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(productImageService);
     }
 }

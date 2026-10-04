@@ -4,27 +4,25 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Conversation;
 import za.ac.cput.prm_marketplace.domain.Message;
-import za.ac.cput.prm_marketplace.domain.MessageStatus;
 import za.ac.cput.prm_marketplace.domain.User;
-import za.ac.cput.prm_marketplace.service.IConversationService;
 import za.ac.cput.prm_marketplace.service.IMessageService;
 
 import java.util.List;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -33,255 +31,170 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(MessageController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class MessageControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     @MockitoBean
     private IMessageService messageService;
 
-    @MockitoBean
-    private IConversationService conversationService;
-
-    private UUID id;
+    private UUID callerId;
+    private UUID intruderId;
     private UUID conversationId;
-    private UUID senderId;
+    private UUID messageId;
     private Message message;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
+        callerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
         conversationId = UUID.randomUUID();
-        senderId = UUID.randomUUID();
-        message = buildMessage();
-    }
-
-    private User buildUser(UUID userId) {
-        return new User.Builder()
-                .setId(userId)
-                .setName("Participant")
-                .setEmail("participant@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
-
-    private Message buildMessage() {
-        User sender = buildUser(senderId);
-        Conversation conversation = new Conversation.Builder()
-                .setId(conversationId)
-                .setBuyer(buildUser(UUID.randomUUID()))
-                .setSeller(sender)
-                .build();
-
-        return new Message.Builder()
-                .setId(id)
-                .setConversation(conversation)
-                .setSender(sender)
-                .setBody("Is this available?")
-                .setStatus(MessageStatus.SENT)
+        messageId = UUID.randomUUID();
+        message = new Message.Builder()
+                .setId(messageId)
+                .setConversation(new Conversation.Builder()
+                        .setId(conversationId)
+                        .setBuyer(buildUser(callerId))
+                        .setSeller(buildUser(intruderId))
+                        .build())
+                .setSender(buildUser(callerId))
+                .setBody("Is this still available?")
                 .build();
     }
 
     @Test
-    @DisplayName("create returns 201 with the message")
-    void create_returnsCreated() throws Exception {
-        when(messageService.create(any(Message.class))).thenReturn(message);
+    @DisplayName("listing a thread the caller is not part of returns nothing")
+    void getByConversation_returnsEmptyForNonParticipant() throws Exception {
+        when(messageService.getByConversation(conversationId, callerId)).thenReturn(List.of());
 
-        mockMvc.perform(post("/api/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(message)))
+        mockMvc.perform(get("/api/messages/conversation/" + conversationId)
+                        .with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+
+        verify(messageService).getByConversation(conversationId, callerId);
+    }
+
+    @Test
+    @DisplayName("listing the caller's own thread succeeds")
+    void getByConversation_returnsOwnThread() throws Exception {
+        when(messageService.getByConversation(conversationId, callerId)).thenReturn(List.of(message));
+
+        mockMvc.perform(get("/api/messages/conversation/" + conversationId).with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(messageId.toString()));
+    }
+
+    @Test
+    @DisplayName("there is no endpoint that lists every message in the marketplace")
+    void getAll_isGone() throws Exception {
+        mockMvc.perform(get("/api/messages").with(asStudent(callerId)))
+                .andExpect(status().is4xxClientError());
+
+        verifyNoInteractions(messageService);
+    }
+
+    @Test
+    @DisplayName("sending posts as the caller, not as a senderId in the request")
+    void send_ignoresAnySenderIdParameter() throws Exception {
+        when(messageService.send(eq(conversationId), eq(callerId), anyString())).thenReturn(message);
+
+        mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
+                        .param("body", "Still available?")
+                        .with(asStudent(callerId)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.body").value("Is this available?"))
-                .andExpect(jsonPath("$.status").value("SENT"));
+                .andExpect(jsonPath("$.id").value(messageId.toString()));
+
+        verify(messageService).send(conversationId, callerId, "Still available?");
     }
 
     @Test
-    @DisplayName("create returns 400 when the service refuses")
-    void create_returnsBadRequest() throws Exception {
-        when(messageService.create(any(Message.class))).thenReturn(null);
+    @DisplayName("sending into a thread the caller is not part of returns 400")
+    void send_returnsBadRequestForNonParticipant() throws Exception {
+        when(messageService.send(conversationId, callerId, "hello")).thenReturn(null);
 
+        mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
+                        .param("body", "hello")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("marking read only ever marks the caller's own messages")
+    void markRead_scopesToTheToken() throws Exception {
+        when(messageService.markRead(conversationId, callerId)).thenReturn(2);
+
+        mockMvc.perform(patch("/api/messages/conversation/" + conversationId + "/read")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.markedRead").value(2));
+
+        verify(messageService).markRead(conversationId, callerId);
+    }
+
+    @Test
+    @DisplayName("the unread count is scoped to the caller")
+    void unreadCount_isScopedToTheCaller() throws Exception {
+        when(messageService.unreadCount(conversationId, callerId)).thenReturn(5L);
+
+        mockMvc.perform(get("/api/messages/conversation/" + conversationId + "/unread-count")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").value(5));
+    }
+
+    @Test
+    @DisplayName("reading a message the caller is not part of returns 404")
+    void read_returnsNotFoundForNonParticipant() throws Exception {
+        when(messageService.read(messageId, callerId)).thenReturn(null);
+
+        mockMvc.perform(get("/api/messages/" + messageId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("messages cannot be created, edited or deleted over HTTP")
+    void crudEndpointsAreGone() throws Exception {
+        String body = "{\"body\":\"forged\"}";
+
+        // There is no POST on /api/messages, so the route is absent entirely (404). Accepting
+        // this request is what let a caller forge the sender on a private message.
         mockMvc.perform(post("/api/messages")
+                        .with(asStudent(callerId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(message)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("read returns the message")
-    void read_returnsMessage() throws Exception {
-        when(messageService.read(id)).thenReturn(message);
-
-        mockMvc.perform(get("/api/messages/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("read returns 404 for an unknown message")
-    void read_returnsNotFound() throws Exception {
-        when(messageService.read(id)).thenReturn(null);
-
-        mockMvc.perform(get("/api/messages/{id}", id))
+                        .content(body))
                 .andExpect(status().isNotFound());
-    }
 
-    @Test
-    @DisplayName("update forces the path id onto the entity")
-    void update_usesPathId() throws Exception {
-        when(messageService.read(id)).thenReturn(message);
-        when(messageService.update(any(Message.class))).thenReturn(message);
-
-        mockMvc.perform(put("/api/messages/{id}", id)
+        // GET /{id} is mapped but PUT is not, so the method is refused rather than the path.
+        mockMvc.perform(put("/api/messages/" + messageId)
+                        .with(asStudent(callerId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(message)))
-                .andExpect(status().isOk());
+                        .content(body))
+                .andExpect(status().isMethodNotAllowed());
 
-        org.mockito.ArgumentCaptor<Message> captor =
-                org.mockito.ArgumentCaptor.forClass(Message.class);
-        verify(messageService).update(captor.capture());
-        assertThat(captor.getValue().getId()).isEqualTo(id);
+        mockMvc.perform(delete("/api/messages/" + messageId).with(asStudent(callerId)))
+                .andExpect(status().isMethodNotAllowed());
+
+        verifyNoInteractions(messageService);
     }
 
     @Test
-    @DisplayName("update returns 404 when the service refuses")
-    void update_returnsNotFound() throws Exception {
-        when(messageService.update(any(Message.class))).thenReturn(null);
-
-        mockMvc.perform(put("/api/messages/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(message)))
-                .andExpect(status().isNotFound());
+    @DisplayName("message endpoints reject anonymous callers")
+    void requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/messages/conversation/" + conversationId))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/messages/" + messageId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(patch("/api/messages/conversation/" + conversationId + "/read"))
+                .andExpect(status().isUnauthorized());
+        verify(messageService, never()).getByConversation(any(), any());
     }
 
-    @Test
-    @DisplayName("delete returns 204 on success")
-    void delete_returnsNoContent() throws Exception {
-        when(messageService.delete(id)).thenReturn(true);
-
-        mockMvc.perform(delete("/api/messages/{id}", id))
-                .andExpect(status().isNoContent());
-    }
-
-    @Test
-    @DisplayName("delete returns 404 for an unknown message")
-    void delete_returnsNotFound() throws Exception {
-        when(messageService.delete(id)).thenReturn(false);
-
-        mockMvc.perform(delete("/api/messages/{id}", id))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("getAll returns every message")
-    void getAll_returnsList() throws Exception {
-        when(messageService.getAll()).thenReturn(List.of(message));
-
-        mockMvc.perform(get("/api/messages"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getByConversation returns the thread in order")
-    void getByConversation_returnsList() throws Exception {
-        when(messageService.getByConversation(conversationId)).thenReturn(List.of(message));
-
-        mockMvc.perform(get("/api/messages/conversation/{conversationId}", conversationId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].body").value("Is this available?"));
-    }
-
-    @Test
-    @DisplayName("unreadCount returns a numeric count")
-    void unreadCount_returnsNumber() throws Exception {
-        when(messageService.unreadCount(conversationId)).thenReturn(2L);
-
-        mockMvc.perform(get("/api/messages/conversation/{conversationId}/unread-count", conversationId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$").value(2));
-    }
-
-    @Test
-    @DisplayName("send creates a message from the request parameters")
-    void send_createsMessage() throws Exception {
-        when(messageService.send(eq(conversationId), eq(senderId), eq("Hello there")))
-                .thenReturn(message);
-
-        mockMvc.perform(post("/api/messages/conversation/{conversationId}/send", conversationId)
-                        .param("senderId", senderId.toString())
-                        .param("body", "Hello there"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-
-        verify(messageService).send(conversationId, senderId, "Hello there");
-    }
-
-    @Test
-    @DisplayName("send returns 400 when the service refuses the message")
-    void send_returnsBadRequest() throws Exception {
-        when(messageService.send(eq(conversationId), eq(senderId), any())).thenReturn(null);
-
-        mockMvc.perform(post("/api/messages/conversation/{conversationId}/send", conversationId)
-                        .param("senderId", senderId.toString())
-                        .param("body", "Hello there"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("send requires a body parameter")
-    void send_withoutBody_returnsBadRequest() throws Exception {
-        mockMvc.perform(post("/api/messages/conversation/{conversationId}/send", conversationId)
-                        .param("senderId", senderId.toString()))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("send rejects a non-UUID senderId")
-    void send_withMalformedSender_returnsBadRequest() throws Exception {
-        mockMvc.perform(post("/api/messages/conversation/{conversationId}/send", conversationId)
-                        .param("senderId", "not-a-uuid")
-                        .param("body", "Hello"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("markRead reports how many messages were updated")
-    void markRead_returnsCount() throws Exception {
-        when(messageService.markRead(conversationId, senderId)).thenReturn(3);
-
-        mockMvc.perform(patch("/api/messages/conversation/{conversationId}/read", conversationId)
-                        .param("readerId", senderId.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.markedRead").value(3));
-    }
-
-    @Test
-    @DisplayName("markRead returns zero when nothing was updated")
-    void markRead_returnsZero() throws Exception {
-        when(messageService.markRead(conversationId, senderId)).thenReturn(0);
-
-        mockMvc.perform(patch("/api/messages/conversation/{conversationId}/read", conversationId)
-                        .param("readerId", senderId.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.markedRead").value(0));
-    }
-
-    @Test
-    @DisplayName("a message never leaks a participant's password hash")
-    void message_doesNotLeakPasswordHash() throws Exception {
-        when(messageService.read(id)).thenReturn(message);
-
-        String body = mockMvc.perform(get("/api/messages/{id}", id))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("passwordHash").doesNotContain("\"hash\"");
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }
 }

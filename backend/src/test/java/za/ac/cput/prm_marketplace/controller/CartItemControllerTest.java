@@ -1,14 +1,13 @@
 package za.ac.cput.prm_marketplace.controller;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.service.ICartItemService;
 
@@ -16,178 +15,149 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(CartItemController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class CartItemControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     @MockitoBean
     private ICartItemService cartItemService;
 
-    private UUID id;
-    private UUID userId;
+    private UUID callerId;
+    private UUID intruderId;
     private UUID productId;
-    private CartItem item;
-    private CartItem otherItem;
+    private UUID cartItemId;
+    private CartItem cartItem;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
-        userId = UUID.randomUUID();
+        callerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
         productId = UUID.randomUUID();
-
-        item = CartItem.builder().id(id).quantity(2).build();
-        otherItem = CartItem.builder().id(UUID.randomUUID()).quantity(1).build();
+        cartItemId = UUID.randomUUID();
+        cartItem = new CartItem.Builder().id(cartItemId).product(null).quantity(2).build();
     }
 
-    // create
-
     @Test
-    void create_returnsCreatedCartItem() throws Exception {
-        when(cartItemService.create(any(CartItem.class))).thenReturn(item);
+    @DisplayName("adding to the cart uses the caller's id, not a userId in the request")
+    void addToCart_scopesToTheToken() throws Exception {
+        when(cartItemService.addToCart(eq(callerId), eq(productId), eq(3))).thenReturn(cartItem);
 
         mockMvc.perform(post("/api/cart-items")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(item)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.quantity").value(2));
-    }
-
-    // read
-
-    @Test
-    void read_existingItem_returnsOk() throws Exception {
-        when(cartItemService.read(id)).thenReturn(item);
-
-        mockMvc.perform(get("/api/cart-items/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.quantity").value(2));
-    }
-
-    @Test
-    void read_missingItem_returnsNotFound() throws Exception {
-        when(cartItemService.read(id)).thenReturn(null);
-
-        mockMvc.perform(get("/api/cart-items/{id}", id))
-                .andExpect(status().isNotFound());
-    }
-
-    // update
-
-    @Test
-    void update_existingItem_returnsOk() throws Exception {
-        when(cartItemService.read(id)).thenReturn(item);
-        when(cartItemService.update(any(CartItem.class))).thenReturn(item);
-
-        mockMvc.perform(put("/api/cart-items/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(item)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.quantity").value(2));
-    }
-
-    @Test
-    void update_missingItem_returnsNotFound() throws Exception {
-        when(cartItemService.read(id)).thenReturn(null);
-
-        mockMvc.perform(put("/api/cart-items/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(item)))
-                .andExpect(status().isNotFound());
-
-        verify(cartItemService, never()).update(any(CartItem.class));
-    }
-
-    // delete
-
-    @Test
-    void delete_existingItem_returnsNoContent() throws Exception {
-        when(cartItemService.read(id)).thenReturn(item);
-
-        mockMvc.perform(delete("/api/cart-items/{id}", id))
-                .andExpect(status().isNoContent());
-
-        verify(cartItemService).delete(id);
-    }
-
-    @Test
-    void delete_missingItem_returnsNotFoundAndDoesNotDelete() throws Exception {
-        when(cartItemService.read(id)).thenReturn(null);
-
-        mockMvc.perform(delete("/api/cart-items/{id}", id))
-                .andExpect(status().isNotFound());
-
-        verify(cartItemService, never()).delete(any(UUID.class));
-    }
-
-
-    @Test
-    void getByUser_returnsUsersCart() throws Exception {
-        when(cartItemService.getByUser(userId)).thenReturn(List.of(item, otherItem));
-
-        mockMvc.perform(get("/api/cart-items/user/{userId}", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].quantity").value(2))
-                .andExpect(jsonPath("$[1].quantity").value(1));
-    }
-
-    @Test
-    void getByUser_emptyCart_returnsEmptyArray() throws Exception {
-        when(cartItemService.getByUser(userId)).thenReturn(List.of());
-
-        mockMvc.perform(get("/api/cart-items/user/{userId}", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
-    }
-
-    @Test
-    void addToCart_returnsCreatedItem() throws Exception {
-        when(cartItemService.addToCart(userId, productId, 2)).thenReturn(item);
-
-        mockMvc.perform(post("/api/cart-items/add")
-                        .param("userId", userId.toString())
                         .param("productId", productId.toString())
-                        .param("quantity", "2"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.quantity").value(2));
+                        .param("quantity", "3")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isCreated());
+
+        verify(cartItemService).addToCart(callerId, productId, 3);
     }
 
     @Test
-    void updateQuantity_existingItem_returnsOk() throws Exception {
-        when(cartItemService.updateQuantity(id, 2)).thenReturn(item);
+    @DisplayName("the old /add route that took an arbitrary userId is gone")
+    void addToCart_legacyUserIdRouteIsGone() throws Exception {
+        // "/api/cart-items/add" is no longer mapped; POST on it is refused outright. Either way the
+        // userId in the request never reaches the service.
+        mockMvc.perform(post("/api/cart-items/add")
+                        .param("userId", intruderId.toString())
+                        .param("productId", productId.toString())
+                        .param("quantity", "1")
+                        .with(asStudent(callerId)))
+                .andExpect(status().is4xxClientError());
 
-        mockMvc.perform(put("/api/cart-items/{id}/quantity", id)
-                        .param("quantity", "2"))
+        verifyNoInteractions(cartItemService);
+    }
+
+    @Test
+    @DisplayName("the cart list is the caller's, and the /user/{userId} route is gone")
+    void getAll_isScopedToTheCaller() throws Exception {
+        when(cartItemService.getByUser(callerId)).thenReturn(List.of(cartItem));
+
+        mockMvc.perform(get("/api/cart-items").with(asStudent(callerId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.quantity").value(2));
+                .andExpect(jsonPath("$[0].id").value(cartItemId.toString()));
+
+        verify(cartItemService).getByUser(callerId);
+
+        mockMvc.perform(get("/api/cart-items/user/" + intruderId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    void updateQuantity_serviceReturnsNull_returnsNoContent() throws Exception {
-        when(cartItemService.updateQuantity(id, 0)).thenReturn(null);
+    @DisplayName("reading a cart line that is not the caller's returns 404")
+    void read_returnsNotFoundForAnotherAccountsLine() throws Exception {
+        when(cartItemService.read(cartItemId, callerId)).thenReturn(null);
 
-        mockMvc.perform(put("/api/cart-items/{id}/quantity", id)
-                        .param("quantity", "0"))
-                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/cart-items/" + cartItemId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    void clearCart_returnsNoContent() throws Exception {
-        mockMvc.perform(delete("/api/cart-items/user/{userId}", userId))
+    @DisplayName("changing a quantity on someone else's cart line has no effect")
+    void updateQuantity_returnsNotFoundForAnotherAccountsLine() throws Exception {
+        when(cartItemService.updateQuantity(eq(cartItemId), eq(callerId), anyInt())).thenReturn(null);
+
+        mockMvc.perform(put("/api/cart-items/" + cartItemId + "/quantity")
+                        .param("quantity", "99")
+                        .with(asStudent(callerId)))
                 .andExpect(status().isNoContent());
 
-        verify(cartItemService).clearCart(userId);
+        verify(cartItemService).updateQuantity(cartItemId, callerId, 99);
+    }
+
+    @Test
+    @DisplayName("changing a quantity on the caller's own line succeeds")
+    void updateQuantity_returnsUpdatedLine() throws Exception {
+        when(cartItemService.updateQuantity(cartItemId, callerId, 5)).thenReturn(cartItem);
+
+        mockMvc.perform(put("/api/cart-items/" + cartItemId + "/quantity")
+                        .param("quantity", "5")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("deleting a cart line that is not the caller's returns 404")
+    void delete_returnsNotFoundForAnotherAccountsLine() throws Exception {
+        when(cartItemService.delete(cartItemId, callerId)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/cart-items/" + cartItemId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("emptying the cart only ever touches the caller's cart")
+    void clearCart_scopesToTheCaller() throws Exception {
+        mockMvc.perform(delete("/api/cart-items").with(asStudent(callerId)))
+                .andExpect(status().isNoContent());
+
+        verify(cartItemService).clearCart(callerId);
+
+        mockMvc.perform(delete("/api/cart-items/user/" + intruderId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("cart endpoints reject anonymous callers")
+    void requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/cart-items")).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/cart-items")).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/cart-items/" + cartItemId)).andExpect(status().isUnauthorized());
+        verify(cartItemService, never()).clearCart(any());
     }
 }

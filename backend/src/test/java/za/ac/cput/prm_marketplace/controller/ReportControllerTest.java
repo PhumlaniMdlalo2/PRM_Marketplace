@@ -1,30 +1,43 @@
 package za.ac.cput.prm_marketplace.controller;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Report;
 import za.ac.cput.prm_marketplace.domain.ReportStatus;
 import za.ac.cput.prm_marketplace.domain.ReportTargetType;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.service.IReportService;
-import tools.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(ReportController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class ReportControllerTest {
 
     @Autowired
@@ -36,135 +49,190 @@ class ReportControllerTest {
     @MockitoBean
     private IReportService reportService;
 
-    private User buildUser() {
-        return new User.Builder()
-                .setId(UUID.randomUUID())
-                .setName("Jane Doe")
-                .setEmail("jane@example.com")
-                .setPasswordHash("hash")
-                .setRole(Role.STUDENT)
-                .build();
-    }
+    private UUID reporterId;
+    private UUID intruderId;
+    private UUID reportId;
+    private UUID targetId;
+    private Report report;
 
-    private Report buildReport(UUID id) {
-        return new Report.Builder()
-                .setId(id)
-                .setReporter(buildUser())
+    @BeforeEach
+    void setUp() {
+        reporterId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        reportId = UUID.randomUUID();
+        targetId = UUID.randomUUID();
+        report = new Report.Builder()
+                .setId(reportId)
+                .setReporter(buildUser(reporterId))
                 .setTargetType(ReportTargetType.PRODUCT)
-                .setReason("Counterfeit")
+                .setTargetId(targetId)
+                .setReason("Misleading description")
                 .setStatus(ReportStatus.OPEN)
                 .build();
     }
 
     @Test
-    void createReturnsCreatedWhenServiceSucceeds() throws Exception {
-        Report report = buildReport(null);
-        Report saved = buildReport(UUID.randomUUID());
-        when(reportService.create(any(Report.class))).thenReturn(saved);
+    @DisplayName("filing a report attributes it to the caller and starts it OPEN")
+    void create_takesTheReporterFromTheToken() throws Exception {
+        when(reportService.create(any(), eq(reporterId))).thenReturn(report);
 
-        mockMvc.perform(post("/reports")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(report)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.reason").value("Counterfeit"));
+        // The body files the complaint against another account and pre-dismisses it.
+        Report hostile = new Report.Builder()
+                .copy(report)
+                .setReporter(buildUser(intruderId))
+                .setStatus(ReportStatus.DISMISSED)
+                .build();
+
+        mockMvc.perform(post("/api/reports")
+                        .with(asStudent(reporterId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(hostile)))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<Report> captor = ArgumentCaptor.forClass(Report.class);
+        verify(reportService).create(captor.capture(), eq(reporterId));
+        assertThat(captor.getValue().getTargetId()).isEqualTo(targetId);
     }
 
     @Test
-    void createReturnsBadRequestWhenServiceRejects() throws Exception {
-        Report report = buildReport(null);
-        when(reportService.create(any(Report.class))).thenReturn(null);
+    @DisplayName("filing a report returns 400 when it cannot be saved")
+    void create_returnsBadRequestWhenServiceReturnsNull() throws Exception {
+        when(reportService.create(any(), eq(reporterId))).thenReturn(null);
 
-        mockMvc.perform(post("/reports")
-                        .contentType("application/json")
+        mockMvc.perform(post("/api/reports")
+                        .with(asStudent(reporterId))
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(report)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    void readReturnsReportWhenFound() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(reportService.read(id)).thenReturn(buildReport(id));
+    @DisplayName("the report list is the caller's own, and it moved under /api")
+    void getAll_isScopedToTheCaller() throws Exception {
+        when(reportService.getByReporter(reporterId)).thenReturn(List.of(report));
 
-        mockMvc.perform(get("/reports/{id}", id))
+        mockMvc.perform(get("/api/reports").with(asStudent(reporterId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reason").value("Counterfeit"));
-    }
+                .andExpect(jsonPath("$[0].id").value(reportId.toString()));
 
-    @Test
-    void readReturnsNotFoundWhenMissing() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(reportService.read(id)).thenReturn(null);
+        verify(reportService).getByReporter(reporterId);
 
-        mockMvc.perform(get("/reports/{id}", id))
+        mockMvc.perform(get("/reports").with(asStudent(reporterId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void updateReturnsOkWhenServiceSucceeds() throws Exception {
-        Report report = buildReport(UUID.randomUUID());
-        when(reportService.update(any(Report.class))).thenReturn(report);
+    @DisplayName("reading a report filed by somebody else returns 404")
+    void read_returnsNotFoundForAnotherAccountsReport() throws Exception {
+        when(reportService.read(reportId, reporterId)).thenReturn(null);
 
-        mockMvc.perform(put("/reports")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(report)))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void updateReturnsNotFoundWhenServiceRejects() throws Exception {
-        Report report = buildReport(UUID.randomUUID());
-        when(reportService.update(any(Report.class))).thenReturn(null);
-
-        mockMvc.perform(put("/reports")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(report)))
+        mockMvc.perform(get("/api/reports/" + reportId).with(asStudent(reporterId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void deleteReturnsNoContentWhenDeleted() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(reportService.delete(id)).thenReturn(true);
+    @DisplayName("reading the caller's own report succeeds")
+    void read_returnsTheReport() throws Exception {
+        when(reportService.read(reportId, reporterId)).thenReturn(report);
 
-        mockMvc.perform(delete("/reports/{id}", id))
+        mockMvc.perform(get("/api/reports/" + reportId).with(asStudent(reporterId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(reportId.toString()));
+    }
+
+    @Test
+    @DisplayName("withdrawing a report filed by somebody else returns 404")
+    void delete_returnsNotFoundForAnotherAccountsReport() throws Exception {
+        when(reportService.delete(reportId, reporterId)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/reports/" + reportId).with(asStudent(reporterId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("withdrawing the caller's own report succeeds")
+    void delete_returnsNoContent() throws Exception {
+        when(reportService.delete(reportId, reporterId)).thenReturn(true);
+
+        mockMvc.perform(delete("/api/reports/" + reportId).with(asStudent(reporterId)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    void deleteReturnsNotFoundWhenMissing() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(reportService.delete(id)).thenReturn(false);
+    @DisplayName("the generic update that let anyone rewrite a report is not reachable")
+    void update_bodyEndpointIsGone() throws Exception {
+        // The path is bound for filing a report, so a bare PUT is answered 405 rather than 404.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/api/reports")
+                        .with(asStudent(reporterId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(report)))
+                .andExpect(status().isMethodNotAllowed());
+    }
 
-        mockMvc.perform(delete("/reports/{id}", id))
+    @Test
+    @DisplayName("a student asking for the moderation view gets nothing")
+    void moderationView_isEmptyForStudents() throws Exception {
+        when(reportService.getAll(Role.STUDENT)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/reports/moderation/all").with(asStudent(reporterId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+
+        verify(reportService).getAll(Role.STUDENT);
+    }
+
+    @Test
+    @DisplayName("faculty can list every report and filter by status")
+    void moderationView_isAvailableToFaculty() throws Exception {
+        when(reportService.getAll(Role.FACULTY)).thenReturn(List.of(report));
+        when(reportService.getByStatus(ReportStatus.OPEN, Role.FACULTY)).thenReturn(List.of(report));
+
+        mockMvc.perform(get("/api/reports/moderation/all").with(as(reporterId, Role.FACULTY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(reportId.toString()));
+
+        mockMvc.perform(get("/api/reports/moderation/status/OPEN").with(as(reporterId, Role.FACULTY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(reportId.toString()));
+    }
+
+    @Test
+    @DisplayName("a student cannot resolve a report")
+    void resolve_isRefusedForStudents() throws Exception {
+        when(reportService.resolve(any(), any(), any(), any(), eq(Role.STUDENT))).thenReturn(null);
+
+        mockMvc.perform(patch("/api/reports/" + reportId + "/status")
+                        .with(asStudent(reporterId))
+                        .param("status", "RESOLVED"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void getAllReturnsListOfReports() throws Exception {
-        when(reportService.getAll()).thenReturn(List.of(buildReport(UUID.randomUUID())));
+    @DisplayName("faculty can resolve a report")
+    void resolve_isAllowedForFaculty() throws Exception {
+        when(reportService.resolve(reportId, ReportStatus.RESOLVED, "Vendor corrected the listing",
+                reporterId, Role.FACULTY)).thenReturn(report);
 
-        mockMvc.perform(get("/reports"))
+        mockMvc.perform(patch("/api/reports/" + reportId + "/status")
+                        .with(as(reporterId, Role.FACULTY))
+                        .param("status", "RESOLVED")
+                        .param("notes", "Vendor corrected the listing"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].reason").value("Counterfeit"));
+                .andExpect(jsonPath("$.id").value(reportId.toString()));
     }
 
     @Test
-    void findByReporterIdReturnsReportWhenFound() throws Exception {
-        UUID reporterId = UUID.randomUUID();
-        Report report = buildReport(UUID.randomUUID());
-        when(reportService.findByReporterId(reporterId)).thenReturn(Optional.of(report));
+    @DisplayName("report endpoints reject anonymous callers")
+    void requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/reports")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/reports/" + reportId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/reports/" + reportId)).andExpect(status().isUnauthorized());
 
-        mockMvc.perform(get("/reports/reporter/{reporterId}", reporterId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reason").value("Counterfeit"));
+        verify(reportService, never()).delete(any(), any());
     }
 
-    @Test
-    void findByReporterIdReturnsNotFoundWhenMissing() throws Exception {
-        UUID reporterId = UUID.randomUUID();
-        when(reportService.findByReporterId(reporterId)).thenReturn(Optional.empty());
-
-        mockMvc.perform(get("/reports/reporter/{reporterId}", reporterId))
-                .andExpect(status().isNotFound());
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }
 }

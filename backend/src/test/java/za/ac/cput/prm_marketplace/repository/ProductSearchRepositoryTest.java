@@ -17,6 +17,8 @@ import za.ac.cput.prm_marketplace.domain.ProductCondition;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.dto.ProductSearchCriteria;
+import za.ac.cput.prm_marketplace.service.ProductServiceImpl;
 
 import java.math.BigDecimal;
 
@@ -42,8 +44,12 @@ class ProductSearchRepositoryTest {
 
     private VendorProfile vendor;
 
+    private ProductServiceImpl service;
+
     @BeforeEach
     void setUp() {
+        service = new ProductServiceImpl(productRepository, vendorProfileRepository);
+
         User user = userRepository.save(new User.Builder()
                 .setName("Vendor Owner")
                 .setEmail("vendor-" + System.nanoTime() + "@example.com")
@@ -179,5 +185,69 @@ class ProductSearchRepositoryTest {
 
         assertThat(page.getContent()).isEmpty();
         assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    /**
+     * The remaining cases drive the real {@link ProductServiceImpl} rather than a hand-written
+     * specification, because the interesting behaviour (LIKE escaping, case folding) only exists
+     * once the service has turned the criteria into a query.
+     */
+    @Test
+    @DisplayName("a bare percent sign is searched for literally instead of matching every product")
+    void keywordWildcard_isTreatedAsALiteral() {
+        product("Algebra Textbook", "Books", "Cape Town", "120.00", ProductCondition.GOOD, true);
+        product("Desk Lamp", "Furniture", "Durban", "80.00", ProductCondition.NEW, true);
+
+        Page<Product> page = service.search(criteria("%", null, null, null, null, null));
+
+        assertThat(page.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("an underscore is searched for literally instead of matching any single character")
+    void keywordUnderscore_isTreatedAsALiteral() {
+        product("Graphing Calculator", "Electronics", "Cape Town", "450.00", ProductCondition.LIKE_NEW, true);
+
+        // "Study_Podio" would match "Study Podio" if the underscore were a wildcard.
+        assertThat(service.search(criteria("Study_Podio", null, null, null, null, null))
+                .getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("a real keyword containing an underscore still matches")
+    void keywordUnderscore_stillMatchesLiteralText() {
+        product("Study_Podio", "Furniture", "Durban", "95.00", ProductCondition.NEW, true);
+
+        assertThat(service.search(criteria("Study_Podio", null, null, null, null, null))
+                .getContent()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("category is matched case insensitively, like city and keyword already are")
+    void category_isMatchedCaseInsensitively() {
+        product("Laptop", "Electronics", "Cape Town", "8999.99", ProductCondition.NEW, true);
+        product("Desk Lamp", "Furniture", "Durban", "80.00", ProductCondition.NEW, true);
+
+        assertThat(service.search(criteria(null, "electronics", null, null, null, null))
+                .getContent()).extracting(Product::getName).containsExactly("Laptop");
+
+        assertThat(service.search(criteria(null, "ELECTRONICS", null, null, null, null))
+                .getContent()).extracting(Product::getName).containsExactly("Laptop");
+    }
+
+    private ProductSearchCriteria criteria(String keyword, String category, String minPrice, String maxPrice,
+                                           ProductCondition condition, Boolean activeOnly) {
+        return new ProductSearchCriteria(
+                keyword,
+                category,
+                null,
+                minPrice == null ? null : new BigDecimal(minPrice),
+                maxPrice == null ? null : new BigDecimal(maxPrice),
+                condition,
+                activeOnly,
+                0,
+                20,
+                "name",
+                "asc");
     }
 }

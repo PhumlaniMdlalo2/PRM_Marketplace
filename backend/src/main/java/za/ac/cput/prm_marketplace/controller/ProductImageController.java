@@ -3,13 +3,26 @@ package za.ac.cput.prm_marketplace.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.ProductImage;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IProductImageService;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * The photographs attached to a listing.
+ *
+ * <p>Creating takes the product from the path rather than the body, and every write takes the
+ * caller. The previous controller accepted the product inside the request body and did not know
+ * who was asking, so any authenticated caller could add an image to any product, re-point an
+ * existing image at a different product, or delete every image on a listing.
+ *
+ * <p>{@code GET /api/product-images} is gone: it returned every image row in the system at once,
+ * which is every seller's photography in one unordered list.
+ */
 @RestController
 @RequestMapping("/api/product-images")
 public class ProductImageController {
@@ -21,11 +34,18 @@ public class ProductImageController {
         this.productImageService = productImageService;
     }
 
-    @PostMapping
-    public ResponseEntity<ProductImage> create(@RequestBody ProductImage image) {
-        ProductImage created = productImageService.create(image);
+    /**
+     * Attaches an image to one of the caller's own products. The body's product is ignored, and
+     * flagging an image primary demotes whichever image held it before.
+     */
+    @PostMapping("/product/{productId}")
+    public ResponseEntity<ProductImage> create(@PathVariable UUID productId,
+                                               @RequestBody ProductImage image,
+                                               Authentication authentication) {
+        ProductImage created = productImageService.create(productId, image,
+                CurrentCaller.id(authentication));
         if (created == null) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.notFound().build();
         }
         return new ResponseEntity<>(created, HttpStatus.CREATED);
     }
@@ -39,27 +59,24 @@ public class ProductImageController {
         return ResponseEntity.ok(image);
     }
 
+    /** Updates one of the caller's own images. An image on somebody else's product is not found. */
     @PutMapping("/{id}")
-    public ResponseEntity<ProductImage> update(@PathVariable UUID id, @RequestBody ProductImage image) {
-        ProductImage existing = productImageService.read(id);
-        if (existing == null) {
+    public ResponseEntity<ProductImage> update(@PathVariable UUID id,
+                                               @RequestBody ProductImage image,
+                                               Authentication authentication) {
+        ProductImage updated = productImageService.update(id, image, CurrentCaller.id(authentication));
+        if (updated == null) {
             return ResponseEntity.notFound().build();
         }
-        ProductImage toUpdate = new ProductImage.Builder().copy(image).setId(id).build();
-        return ResponseEntity.ok(productImageService.update(toUpdate));
+        return ResponseEntity.ok(updated);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        if (!productImageService.delete(id)) {
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
+        if (!productImageService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping
-    public ResponseEntity<List<ProductImage>> getAll() {
-        return ResponseEntity.ok(productImageService.getAll());
     }
 
     @GetMapping("/product/{productId}")
@@ -76,9 +93,11 @@ public class ProductImageController {
         return ResponseEntity.ok(image);
     }
 
+    /** Clears the gallery on one of the caller's own products. */
     @DeleteMapping("/product/{productId}")
-    public ResponseEntity<Void> deleteByProduct(@PathVariable UUID productId) {
-        if (!productImageService.deleteByProduct(productId)) {
+    public ResponseEntity<Void> deleteByProduct(@PathVariable UUID productId,
+                                                Authentication authentication) {
+        if (!productImageService.deleteByProduct(productId, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();

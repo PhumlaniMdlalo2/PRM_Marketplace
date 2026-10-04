@@ -1,21 +1,27 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
 @Table(name = "bulletin_posts")
 public class BulletinPost {
 
-    @Id
+    /**
+     * Stays writable on purpose. A comment names its post as a nested object, so Jackson has to be
+     * able to read the post's id out of the request. Mass assignment is handled in the service,
+     * which rebuilds the entity instead of copying the body.
+     */
+@Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @ManyToOne
     @JoinColumn(name = "author_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User author;
 
     @Column(nullable = false)
@@ -30,12 +36,15 @@ public class BulletinPost {
     private String imageUrl;
 
     @Column(name = "comment_count")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private int commentCount;
 
     @Column(name = "like_count")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private int likeCount;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected BulletinPost() {
@@ -94,9 +103,15 @@ public class BulletinPost {
     }
 
     public void decrementCommentCount() {
-        if (this.commentCount > 0) {
-            this.commentCount--;
+        decrementCommentCount(1);
+    }
+
+    /** Decrements by {@code amount}, never below zero. */
+    public void decrementCommentCount(int amount) {
+        if (amount <= 0) {
+            return;
         }
+        this.commentCount = Math.max(0, this.commentCount - amount);
     }
 
     public void incrementLikeCount() {
@@ -119,12 +134,12 @@ public class BulletinPost {
         if (this == o) return true;
         if (!(o instanceof BulletinPost)) return false;
         BulletinPost that = (BulletinPost) o;
-        return Objects.equals(id, that.id);
+        return id != null && id.equals(that.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

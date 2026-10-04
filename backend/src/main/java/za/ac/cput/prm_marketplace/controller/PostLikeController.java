@@ -3,8 +3,10 @@ package za.ac.cput.prm_marketplace.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.PostLike;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IPostLikeService;
 
 import java.util.List;
@@ -21,58 +23,24 @@ public class PostLikeController {
         this.postLikeService = postLikeService;
     }
 
-    @PostMapping
-    public ResponseEntity<PostLike> create(@RequestBody PostLike postLike) {
-        PostLike created = postLikeService.create(postLike);
-        if (created == null) {
-            return ResponseEntity.badRequest().build();
-        }
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<PostLike> read(@PathVariable UUID id) {
-        PostLike postLike = postLikeService.read(id);
-        if (postLike == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(postLike);
-    }
-
-    @PutMapping("/{id}")
-    public ResponseEntity<PostLike> update(@PathVariable UUID id, @RequestBody PostLike postLike) {
-        PostLike existing = postLikeService.read(id);
-        if (existing == null) {
-            return ResponseEntity.notFound().build();
-        }
-        PostLike toUpdate = new PostLike.Builder().copy(postLike).setId(id).build();
-        return ResponseEntity.ok(postLikeService.update(toUpdate));
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        if (!postLikeService.delete(id)) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping
-    public ResponseEntity<List<PostLike>> getAll() {
-        return ResponseEntity.ok(postLikeService.getAll());
-    }
-
-    @PostMapping("/post/{postId}/user/{userId}/toggle")
-    public ResponseEntity<PostLike> toggle(@PathVariable UUID postId, @PathVariable UUID userId) {
-        PostLike result = postLikeService.toggle(postId, userId);
+    /**
+     * Likes or unlikes as the caller. The former route took a userId in the path, so anyone could
+     * like a post on behalf of any other account, and "POST /api/post-likes" accepted a whole body
+     * naming whoever they liked as.
+     */
+    @PostMapping("/post/{postId}/toggle")
+    public ResponseEntity<PostLike> toggle(@PathVariable UUID postId, Authentication authentication) {
+        PostLike result = postLikeService.toggle(postId, CurrentCaller.id(authentication));
+        // A null result means the caller's like was removed, which is a 204 rather than an error.
         return result == null
                 ? ResponseEntity.noContent().build()
-                : ResponseEntity.ok(result);
+                : new ResponseEntity<>(result, HttpStatus.CREATED);
     }
 
-    @GetMapping("/post/{postId}/user/{userId}")
-    public ResponseEntity<Boolean> hasLiked(@PathVariable UUID postId, @PathVariable UUID userId) {
-        return ResponseEntity.ok(postLikeService.hasLiked(postId, userId));
+    /** Whether the caller liked the post. */
+    @GetMapping("/post/{postId}")
+    public ResponseEntity<Boolean> hasLiked(@PathVariable UUID postId, Authentication authentication) {
+        return ResponseEntity.ok(postLikeService.hasLiked(postId, CurrentCaller.id(authentication)));
     }
 
     @GetMapping("/post/{postId}/count")
@@ -80,8 +48,9 @@ public class PostLikeController {
         return ResponseEntity.ok(postLikeService.countByPost(postId));
     }
 
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<List<PostLike>> getByUser(@PathVariable UUID userId) {
-        return ResponseEntity.ok(postLikeService.getByUser(userId));
+    /** The posts the caller has liked. */
+    @GetMapping
+    public ResponseEntity<List<PostLike>> getByUser(Authentication authentication) {
+        return ResponseEntity.ok(postLikeService.getByUser(CurrentCaller.id(authentication)));
     }
 }

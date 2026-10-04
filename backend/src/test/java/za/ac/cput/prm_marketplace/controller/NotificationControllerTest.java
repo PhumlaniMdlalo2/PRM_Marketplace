@@ -1,11 +1,12 @@
 package za.ac.cput.prm_marketplace.controller;
 
-import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
@@ -13,16 +14,26 @@ import za.ac.cput.prm_marketplace.domain.Notification;
 import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.service.INotificationService;
 
-import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(NotificationController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class NotificationControllerTest {
 
     @Autowired
@@ -34,162 +45,156 @@ class NotificationControllerTest {
     @MockitoBean
     private INotificationService notificationService;
 
-    private UUID id;
-    private UUID userId;
+    private UUID callerId;
+    private UUID intruderId;
+    private UUID notificationId;
     private Notification notification;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
-        userId = UUID.randomUUID();
-        notification = buildNotification(false);
-    }
-
-    private Notification buildNotification(boolean read) {
-        return new Notification.Builder()
-                .setId(id)
-                .setUserId(userId)
-                .setType(NotificationType.PAYMENT)
-                .setTitle("Payment successful")
-                .setMessage("Your payment went through.")
-                .setRead(read)
+        callerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        notificationId = UUID.randomUUID();
+        notification = new Notification.Builder()
+                .setId(notificationId)
+                .setUserId(callerId)
+                .setType(NotificationType.SYSTEM)
+                .setTitle("Welcome")
+                .setMessage("Your account is ready")
                 .build();
     }
 
     @Test
-    void create_returnsCreatedWhenServiceSucceeds() throws Exception {
-        when(notificationService.create(any(Notification.class))).thenReturn(notification);
+    @DisplayName("the inbox is the caller's, and the /user/{userId} route is gone")
+    void getAll_isScopedToTheCaller() throws Exception {
+        when(notificationService.getByUserId(callerId)).thenReturn(List.of(notification));
 
-        mockMvc.perform(post("/notifications")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(notification)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.title").value("Payment successful"))
-                .andExpect(jsonPath("$.read").value(false));
-    }
-
-    @Test
-    void create_returnsBadRequestWhenServiceRejects() throws Exception {
-        when(notificationService.create(any(Notification.class))).thenReturn(null);
-
-        mockMvc.perform(post("/notifications")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(notification)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void read_existingNotification_returnsOk() throws Exception {
-        when(notificationService.read(id)).thenReturn(notification);
-
-        mockMvc.perform(get("/notifications/{id}", id))
+        mockMvc.perform(get("/api/notifications").with(asStudent(callerId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.type").value("PAYMENT"));
-    }
+                .andExpect(jsonPath("$[0].id").value(notificationId.toString()));
 
-    @Test
-    void read_missingNotification_returnsNotFound() throws Exception {
-        when(notificationService.read(id)).thenReturn(null);
+        verify(notificationService).getByUserId(callerId);
 
-        mockMvc.perform(get("/notifications/{id}", id))
+        mockMvc.perform(get("/api/notifications/user/" + intruderId).with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void update_existingNotification_returnsOk() throws Exception {
-        when(notificationService.update(any(Notification.class))).thenReturn(notification);
-
-        mockMvc.perform(put("/notifications")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(notification)))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void update_missingNotification_returnsNotFound() throws Exception {
-        when(notificationService.update(any(Notification.class))).thenReturn(null);
-
-        mockMvc.perform(put("/notifications")
-                        .contentType("application/json")
-                        .content(objectMapper.writeValueAsString(notification)))
+    @DisplayName("the old unprefixed route is gone")
+    void legacyUnprefixedRouteIsGone() throws Exception {
+        mockMvc.perform(get("/notifications").with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void delete_existingNotification_returnsNoContent() throws Exception {
-        when(notificationService.delete(id)).thenReturn(true);
+    @DisplayName("unread notifications are the caller's")
+    void getUnread_isScopedToTheCaller() throws Exception {
+        when(notificationService.getUnreadByUserId(callerId)).thenReturn(List.of(notification));
 
-        mockMvc.perform(delete("/notifications/{id}", id))
-                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/notifications/unread").with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(notificationId.toString()));
+
+        verify(notificationService).getUnreadByUserId(callerId);
     }
 
     @Test
-    void delete_missingNotification_returnsNotFound() throws Exception {
-        when(notificationService.delete(id)).thenReturn(false);
+    @DisplayName("the unread count is the caller's")
+    void countUnread_isScopedToTheCaller() throws Exception {
+        when(notificationService.countUnread(callerId)).thenReturn(7L);
 
-        mockMvc.perform(delete("/notifications/{id}", id))
+        mockMvc.perform(get("/api/notifications/unread/count").with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").value(7));
+    }
+
+    @Test
+    @DisplayName("reading a notification addressed to someone else returns 404")
+    void read_returnsNotFoundForAnotherAccountsNotification() throws Exception {
+        when(notificationService.read(notificationId, callerId)).thenReturn(null);
+
+        mockMvc.perform(get("/api/notifications/" + notificationId).with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void getAll_returnsList() throws Exception {
-        when(notificationService.getAll()).thenReturn(Arrays.asList(notification, buildNotification(true)));
+    @DisplayName("marking someone else's notification as read returns 404 and changes nothing")
+    void markAsRead_returnsNotFoundForAnotherAccountsNotification() throws Exception {
+        when(notificationService.markAsRead(notificationId, callerId)).thenReturn(null);
 
-        mockMvc.perform(get("/notifications"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2));
+        mockMvc.perform(patch("/api/notifications/" + notificationId + "/read")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+
+        verify(notificationService).markAsRead(notificationId, callerId);
     }
 
     @Test
-    void getByUserId_returnsList() throws Exception {
-        when(notificationService.getByUserId(userId)).thenReturn(Arrays.asList(notification));
+    @DisplayName("deleting a notification addressed to someone else returns 404")
+    void delete_returnsNotFoundForAnotherAccountsNotification() throws Exception {
+        when(notificationService.delete(notificationId, callerId)).thenReturn(false);
 
-        mockMvc.perform(get("/notifications/user/{userId}", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
-    }
-
-    @Test
-    void getUnreadByUserId_returnsList() throws Exception {
-        when(notificationService.getUnreadByUserId(userId)).thenReturn(Arrays.asList(notification));
-
-        mockMvc.perform(get("/notifications/user/{userId}/unread", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].read").value(false));
-    }
-
-    @Test
-    void countUnread_returnsCount() throws Exception {
-        when(notificationService.countUnread(userId)).thenReturn(4L);
-
-        mockMvc.perform(get("/notifications/user/{userId}/unread/count", userId))
-                .andExpect(status().isOk())
-                .andExpect(content().string("4"));
-    }
-
-    @Test
-    void markAsRead_existingNotification_returnsOk() throws Exception {
-        when(notificationService.markAsRead(id)).thenReturn(buildNotification(true));
-
-        mockMvc.perform(patch("/notifications/{id}/read", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.read").value(true));
-    }
-
-    @Test
-    void markAsRead_missingNotification_returnsNotFound() throws Exception {
-        when(notificationService.markAsRead(id)).thenReturn(null);
-
-        mockMvc.perform(patch("/notifications/{id}/read", id))
+        mockMvc.perform(delete("/api/notifications/" + notificationId).with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void markAllAsRead_returnsNumberUpdated() throws Exception {
-        when(notificationService.markAllAsRead(userId)).thenReturn(3);
+    @DisplayName("mark-all-as-read only clears the caller's own notifications")
+    void markAllAsRead_scopesToTheCaller() throws Exception {
+        when(notificationService.markAllAsRead(callerId)).thenReturn(3);
 
-        mockMvc.perform(patch("/notifications/user/{userId}/read-all", userId))
+        mockMvc.perform(patch("/api/notifications/read-all").with(asStudent(callerId)))
                 .andExpect(status().isOk())
-                .andExpect(content().string("3"));
+                .andExpect(jsonPath("$").value(3));
+
+        verify(notificationService).markAllAsRead(callerId);
+
+        mockMvc.perform(patch("/api/notifications/user/" + intruderId + "/read-all")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("notifications cannot be created or edited over HTTP")
+    void createAndUpdateAreNotExposed() throws Exception {
+        String body = objectMapper.writeValueAsString(notification);
+
+        mockMvc.perform(post("/api/notifications")
+                        .with(asStudent(callerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isMethodNotAllowed());
+
+        mockMvc.perform(put("/api/notifications")
+                        .with(asStudent(callerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isMethodNotAllowed());
+
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("a body cannot forge the read flag or the recipient")
+    void readOnlyFieldsAreIgnored() throws Exception {
+        when(notificationService.read(notificationId, callerId)).thenReturn(notification);
+
+        mockMvc.perform(put("/api/notifications/" + notificationId)
+                        .with(asStudent(callerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"" + intruderId + "\",\"read\":true}"))
+                .andExpect(status().isMethodNotAllowed());
+
+        verify(notificationService, never()).read(eq(notificationId), any());
+    }
+
+    @Test
+    @DisplayName("notification endpoints reject anonymous callers")
+    void requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/notifications")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/notifications/" + notificationId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(patch("/api/notifications/" + notificationId + "/read"))
+                .andExpect(status().isUnauthorized());
+        verify(notificationService, never()).getByUserId(any());
     }
 }

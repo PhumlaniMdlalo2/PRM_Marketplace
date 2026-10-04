@@ -1,9 +1,9 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -12,17 +12,21 @@ public class PostLike {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "post_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private BulletinPost post;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User user;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected PostLike() {
@@ -61,12 +65,12 @@ public class PostLike {
         if (this == o) return true;
         if (!(o instanceof PostLike)) return false;
         PostLike postLike = (PostLike) o;
-        return Objects.equals(id, postLike.id);
+        return id != null && id.equals(postLike.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

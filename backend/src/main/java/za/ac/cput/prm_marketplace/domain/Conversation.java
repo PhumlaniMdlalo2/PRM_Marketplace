@@ -1,9 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -14,6 +15,7 @@ public class Conversation {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
     @ManyToOne(optional = false)
@@ -29,9 +31,11 @@ public class Conversation {
     private Product product;
 
     @Column(name = "last_message_at")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime lastMessageAt;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected Conversation() {
@@ -108,12 +112,12 @@ public class Conversation {
         if (this == o) return true;
         if (!(o instanceof Conversation)) return false;
         Conversation that = (Conversation) o;
-        return Objects.equals(id, that.id);
+        return id != null && id.equals(that.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

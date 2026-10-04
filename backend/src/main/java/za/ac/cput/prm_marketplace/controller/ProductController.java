@@ -4,17 +4,30 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.ProductCondition;
 import za.ac.cput.prm_marketplace.dto.PageResponse;
 import za.ac.cput.prm_marketplace.dto.ProductSearchCriteria;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IProductService;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Browsing is public; writing is not.
+ *
+ * <p>{@code POST}, {@code PUT} and the seller's own listing take the caller, because the previous
+ * version published a product carrying a vendor taken from the request body, and let any caller
+ * edit or delete any listing by id.
+ *
+ * <p>There is no delete route. A product that has been ordered is referenced by the order line,
+ * so removing the row fails on the foreign key; sellers retire a listing by setting
+ * {@code active} to false through the update route.
+ */
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
@@ -26,9 +39,17 @@ public class ProductController {
         this.productService = productService;
     }
 
+    /**
+     * Lists a product under the caller's own vendor profile. The body's vendor, active flag and
+     * creation time are ignored: the entity marks them read-only and the service rebuilds the
+     * listing from the stored data.
+     */
     @PostMapping
-    public ResponseEntity<Product> create(@RequestBody Product product) {
-        Product created = productService.create(product);
+    public ResponseEntity<Product> create(@RequestBody Product product, Authentication authentication) {
+        Product created = productService.create(product, CurrentCaller.id(authentication));
+        if (created == null) {
+            return ResponseEntity.badRequest().build();
+        }
         return new ResponseEntity<>(created, HttpStatus.CREATED);
     }
 
@@ -54,6 +75,12 @@ public class ProductController {
         return ResponseEntity.ok(PageResponse.of(results));
     }
 
+    /** The caller's own listings. */
+    @GetMapping("/mine")
+    public ResponseEntity<List<Product>> getMine(Authentication authentication) {
+        return ResponseEntity.ok(productService.getMine(CurrentCaller.id(authentication)));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Product> read(@PathVariable UUID id) {
         Product product = productService.read(id);
@@ -63,25 +90,16 @@ public class ProductController {
         return ResponseEntity.ok(product);
     }
 
+    /** Updates one of the caller's own listings. Somebody else's is reported as not found. */
     @PutMapping("/{id}")
-    public ResponseEntity<Product> update(@PathVariable UUID id, @RequestBody Product product) {
-        Product existing = productService.read(id);
-        if (existing == null) {
+    public ResponseEntity<Product> update(@PathVariable UUID id,
+                                          @RequestBody Product product,
+                                          Authentication authentication) {
+        Product updated = productService.update(id, product, CurrentCaller.id(authentication));
+        if (updated == null) {
             return ResponseEntity.notFound().build();
         }
-        Product toUpdate = Product.builder().copy(product).id(id).build();
-        Product updated = productService.update(toUpdate);
         return ResponseEntity.ok(updated);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        Product existing = productService.read(id);
-        if (existing == null) {
-            return ResponseEntity.notFound().build();
-        }
-        productService.delete(id);
-        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

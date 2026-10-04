@@ -11,4 +11,12 @@ public interface VendorProfileRepository extends JpaRepository<VendorProfile, UU
     Optional<VendorProfile> findByUserId(UUID userId);
 
     boolean existsByUserId(UUID userId);
+
+    /**
+     * Loads a profile only when it belongs to the given account.
+     *
+     * <p>A profile is owned by its user, and every write goes through this rather than
+     * {@code findById}, so one seller cannot edit or delete another's business details.
+     */
+    Optional<VendorProfile> findByIdAndUserId(UUID id, UUID userId);
 }

@@ -4,12 +4,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
 import za.ac.cput.prm_marketplace.domain.PostLike;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -19,209 +17,136 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(PostLikeController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class PostLikeControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     @MockitoBean
     private IPostLikeService postLikeService;
 
-    private UUID id;
+    private UUID callerId;
     private UUID postId;
-    private UUID userId;
-    private PostLike postLike;
+    private UUID likeId;
+    private BulletinPost post;
+    private PostLike like;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
+        callerId = UUID.randomUUID();
         postId = UUID.randomUUID();
-        userId = UUID.randomUUID();
-        postLike = buildPostLike();
-    }
-
-    private User buildUser(UUID userId) {
-        return new User.Builder()
-                .setId(userId)
-                .setName("Reader")
-                .setEmail("reader@example.com")
-                .setPasswordHash("hash")
-                .build();
-    }
-
-    private BulletinPost buildPost() {
-        return new BulletinPost.Builder()
+        likeId = UUID.randomUUID();
+        post = new BulletinPost.Builder()
                 .setId(postId)
-                .setAuthor(buildUser(UUID.randomUUID()))
-                .setTitle("Selling a desk")
-                .setBody("Desk in good condition")
+                .setAuthor(new User.Builder().setId(UUID.randomUUID()).setEmail("a@example.com").build())
+                .setTitle("Water outage")
+                .setBody("Supply is interrupted.")
                 .build();
-    }
-
-    private PostLike buildPostLike() {
-        return new PostLike.Builder()
-                .setId(id)
-                .setPost(buildPost())
-                .setUser(buildUser(userId))
+        like = new PostLike.Builder()
+                .setId(likeId)
+                .setPost(post)
+                .setUser(new User.Builder().setId(callerId).setEmail("c@example.com").build())
                 .build();
     }
 
     @Test
-    @DisplayName("create returns 201 with the like")
-    void create_returnsCreated() throws Exception {
-        when(postLikeService.create(any(PostLike.class))).thenReturn(postLike);
+    @DisplayName("toggling a like uses the caller from the token, not a userId in the path")
+    void toggle_takesTheLikerFromTheToken() throws Exception {
+        when(postLikeService.toggle(postId, callerId)).thenReturn(like);
 
-        mockMvc.perform(post("/api/post-likes")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(postLike)))
+        mockMvc.perform(post("/api/post-likes/post/" + postId + "/toggle").with(asStudent(callerId)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(id.toString()));
+                .andExpect(jsonPath("$.id").value(likeId.toString()));
+
+        verify(postLikeService).toggle(postId, callerId);
     }
 
     @Test
-    @DisplayName("create returns 400 when the service refuses")
-    void create_returnsBadRequest() throws Exception {
-        when(postLikeService.create(any(PostLike.class))).thenReturn(null);
+    @DisplayName("the route that let anyone like on behalf of another account is gone")
+    void toggle_theUserScopedRouteIsGone() throws Exception {
+        UUID intruderId = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/post-likes")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(postLike)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("read returns the like")
-    void read_returnsPostLike() throws Exception {
-        when(postLikeService.read(id)).thenReturn(postLike);
-
-        mockMvc.perform(get("/api/post-likes/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("read returns 404 for an unknown like")
-    void read_returnsNotFound() throws Exception {
-        when(postLikeService.read(id)).thenReturn(null);
-
-        mockMvc.perform(get("/api/post-likes/{id}", id))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("update returns 200 on success")
-    void update_returnsOk() throws Exception {
-        when(postLikeService.read(id)).thenReturn(postLike);
-        when(postLikeService.update(any(PostLike.class))).thenReturn(postLike);
-
-        mockMvc.perform(put("/api/post-likes/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(postLike)))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    @DisplayName("update returns 404 for an unknown like")
-    void update_returnsNotFound() throws Exception {
-        when(postLikeService.read(id)).thenReturn(null);
-
-        mockMvc.perform(put("/api/post-likes/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(postLike)))
+        mockMvc.perform(post("/api/post-likes/toggle/" + postId + "/user/" + intruderId)
+                        .with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
 
-        verify(postLikeService, never()).update(any());
+        verify(postLikeService, never()).toggle(any(), any());
     }
 
     @Test
-    @DisplayName("delete returns 204 on success")
-    void delete_returnsNoContent() throws Exception {
-        when(postLikeService.delete(id)).thenReturn(true);
+    @DisplayName("creating a like from a whole body is no longer possible")
+    void create_bodyEndpointIsGone() throws Exception {
+        // The path is bound for the toggle route but no longer accepts a bare POST, so the router
+        // answers 405 rather than 404.
+        mockMvc.perform(post("/api/post-likes").with(asStudent(callerId)))
+                .andExpect(status().isMethodNotAllowed());
+    }
 
-        mockMvc.perform(delete("/api/post-likes/{id}", id))
+    @Test
+    @DisplayName("toggling off returns 204 rather than an error")
+    void toggle_returnsNoContentWhenTheLikeWasRemoved() throws Exception {
+        // The service returns null both when it removes a like and when the post is missing.
+        when(postLikeService.toggle(postId, callerId)).thenReturn(null);
+
+        mockMvc.perform(post("/api/post-likes/post/" + postId + "/toggle").with(asStudent(callerId)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("delete returns 404 for an unknown like")
-    void delete_returnsNotFound() throws Exception {
-        when(postLikeService.delete(id)).thenReturn(false);
+    @DisplayName("the has-liked check is scoped to the caller")
+    void hasLiked_isScopedToTheCaller() throws Exception {
+        when(postLikeService.hasLiked(postId, callerId)).thenReturn(true);
 
-        mockMvc.perform(delete("/api/post-likes/{id}", id))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("getAll returns every like")
-    void getAll_returnsList() throws Exception {
-        when(postLikeService.getAll()).thenReturn(List.of(postLike));
-
-        mockMvc.perform(get("/api/post-likes"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("toggle creates a like and returns it")
-    void toggle_addsLike() throws Exception {
-        when(postLikeService.toggle(postId, userId)).thenReturn(postLike);
-
-        mockMvc.perform(post("/api/post-likes/post/{postId}/user/{userId}/toggle", postId, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("toggle reports 204 when the like is removed")
-    void toggle_removesLike() throws Exception {
-        when(postLikeService.toggle(postId, userId)).thenReturn(null);
-
-        mockMvc.perform(post("/api/post-likes/post/{postId}/user/{userId}/toggle", postId, userId))
-                .andExpect(status().isNoContent());
-    }
-
-    @Test
-    @DisplayName("hasLiked reports the current state as a boolean")
-    void hasLiked_returnsBoolean() throws Exception {
-        when(postLikeService.hasLiked(postId, userId)).thenReturn(true);
-
-        mockMvc.perform(get("/api/post-likes/post/{postId}/user/{userId}", postId, userId))
+        mockMvc.perform(get("/api/post-likes/post/" + postId).with(asStudent(callerId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value(true));
+
+        verify(postLikeService).hasLiked(postId, callerId);
     }
 
     @Test
-    @DisplayName("countByPost returns the like total")
-    void countByPost_returnsNumber() throws Exception {
-        when(postLikeService.countByPost(postId)).thenReturn(7L);
+    @DisplayName("the like count for a post is readable by any signed-in user")
+    void countByPost_isReadableByAnyCaller() throws Exception {
+        when(postLikeService.countByPost(postId)).thenReturn(12L);
 
-        mockMvc.perform(get("/api/post-likes/post/{postId}/count", postId))
+        mockMvc.perform(get("/api/post-likes/post/" + postId + "/count").with(asStudent(callerId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").value(7));
+                .andExpect(jsonPath("$").value(12));
     }
 
     @Test
-    @DisplayName("getByUser returns the user's likes")
-    void getByUser_returnsList() throws Exception {
-        when(postLikeService.getByUser(userId)).thenReturn(List.of(postLike));
+    @DisplayName("the like list is the caller's own, not every like in the system")
+    void getByUser_isScopedToTheCaller() throws Exception {
+        when(postLikeService.getByUser(callerId)).thenReturn(List.of(like));
 
-        mockMvc.perform(get("/api/post-likes/user/{userId}", userId))
+        mockMvc.perform(get("/api/post-likes").with(asStudent(callerId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
+                .andExpect(jsonPath("$[0].id").value(likeId.toString()));
+
+        verify(postLikeService).getByUser(callerId);
+    }
+
+    @Test
+    @DisplayName("liking requires authentication")
+    void toggle_rejectsAnonymousCallers() throws Exception {
+        mockMvc.perform(post("/api/post-likes/post/" + postId + "/toggle"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/post-likes"))
+                .andExpect(status().isUnauthorized());
+
+        verify(postLikeService, never()).toggle(any(), any());
+        verify(postLikeService, never()).getByUser(eq(callerId));
     }
 }

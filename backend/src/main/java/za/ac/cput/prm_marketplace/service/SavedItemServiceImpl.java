@@ -1,6 +1,7 @@
 package za.ac.cput.prm_marketplace.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.SavedItem;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -27,33 +28,15 @@ public class SavedItemServiceImpl implements ISavedItemService {
     }
 
     @Override
-    public SavedItem create(SavedItem savedItem) {
-        if (savedItem == null) {
-            return null;
-        }
-        return savedItemRepository.save(savedItem);
+    public SavedItem read(UUID id, UUID requesterId) {
+        SavedItem item = find(id);
+        return isOwnedBy(item, requesterId) ? item : null;
     }
 
     @Override
-    public SavedItem read(UUID id) {
-        if (id == null) {
-            return null;
-        }
-        return savedItemRepository.findById(id).orElse(null);
-    }
-
-    @Override
-    public SavedItem update(SavedItem savedItem) {
-        if (savedItem == null || savedItem.getId() == null
-                || !savedItemRepository.existsById(savedItem.getId())) {
-            return null;
-        }
-        return savedItemRepository.save(savedItem);
-    }
-
-    @Override
-    public boolean delete(UUID id) {
-        if (id == null || !savedItemRepository.existsById(id)) {
+    @Transactional
+    public boolean delete(UUID id, UUID requesterId) {
+        if (read(id, requesterId) == null) {
             return false;
         }
         savedItemRepository.deleteById(id);
@@ -61,31 +44,27 @@ public class SavedItemServiceImpl implements ISavedItemService {
     }
 
     @Override
-    public List<SavedItem> getAll() {
-        return savedItemRepository.findAll();
-    }
-
-    @Override
-    public List<SavedItem> getByUser(UUID userId) {
-        if (userId == null) {
+    public List<SavedItem> getByUser(UUID requesterId) {
+        if (requesterId == null) {
             return List.of();
         }
-        return savedItemRepository.findByUserIdOrderBySavedAtDesc(userId);
+        return savedItemRepository.findByUserIdOrderBySavedAtDesc(requesterId);
     }
 
     @Override
-    public SavedItem toggle(UUID userId, UUID productId) {
-        if (userId == null || productId == null) {
+    @Transactional
+    public SavedItem toggle(UUID requesterId, UUID productId) {
+        if (requesterId == null || productId == null) {
             return null;
         }
 
-        var existing = savedItemRepository.findByUserIdAndProductId(userId, productId);
+        var existing = savedItemRepository.findByUserIdAndProductId(requesterId, productId);
         if (existing.isPresent()) {
             savedItemRepository.delete(existing.get());
             return null;
         }
 
-        User user = userRepository.findById(userId).orElse(null);
+        User user = userRepository.findById(requesterId).orElse(null);
         Product product = productRepository.findById(productId).orElse(null);
         if (user == null || product == null) {
             return null;
@@ -98,11 +77,12 @@ public class SavedItemServiceImpl implements ISavedItemService {
     }
 
     @Override
-    public boolean removeByUserAndProduct(UUID userId, UUID productId) {
-        if (userId == null || productId == null) {
+    @Transactional
+    public boolean removeByUserAndProduct(UUID requesterId, UUID productId) {
+        if (requesterId == null || productId == null) {
             return false;
         }
-        return savedItemRepository.findByUserIdAndProductId(userId, productId)
+        return savedItemRepository.findByUserIdAndProductId(requesterId, productId)
                 .map(found -> {
                     savedItemRepository.delete(found);
                     return true;
@@ -111,10 +91,24 @@ public class SavedItemServiceImpl implements ISavedItemService {
     }
 
     @Override
-    public long countByUser(UUID userId) {
-        if (userId == null) {
+    public long countByUser(UUID requesterId) {
+        if (requesterId == null) {
             return 0L;
         }
-        return savedItemRepository.countByUserId(userId);
+        return savedItemRepository.countByUserId(requesterId);
+    }
+
+    private SavedItem find(UUID id) {
+        if (id == null) {
+            return null;
+        }
+        return savedItemRepository.findById(id).orElse(null);
+    }
+
+    private boolean isOwnedBy(SavedItem item, UUID requesterId) {
+        return item != null
+                && item.getUser() != null
+                && item.getUser().getId() != null
+                && item.getUser().getId().equals(requesterId);
     }
 }

@@ -3,9 +3,10 @@ package za.ac.cput.prm_marketplace.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Message;
-import za.ac.cput.prm_marketplace.service.IConversationService;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IMessageService;
 
 import java.util.List;
@@ -17,80 +18,64 @@ import java.util.UUID;
 public class MessageController {
 
     private final IMessageService messageService;
-    private final IConversationService conversationService;
 
     @Autowired
-    public MessageController(IMessageService messageService, IConversationService conversationService) {
+    public MessageController(IMessageService messageService) {
         this.messageService = messageService;
-        this.conversationService = conversationService;
     }
 
-    @PostMapping
-    public ResponseEntity<Message> create(@RequestBody Message message) {
-        Message created = messageService.create(message);
-        if (created == null) {
-            return ResponseEntity.badRequest().build();
-        }
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<Message> read(@PathVariable UUID id) {
-        Message message = messageService.read(id);
-        if (message == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(message);
-    }
-
-    @PutMapping("/{id}")
-    public ResponseEntity<Message> update(@PathVariable UUID id, @RequestBody Message message) {
-        Message existing = messageService.read(id);
-        if (existing == null) {
-            return ResponseEntity.notFound().build();
-        }
-        Message toUpdate = new Message.Builder().copy(message).setId(id).build();
-        return ResponseEntity.ok(messageService.update(toUpdate));
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        if (!messageService.delete(id)) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping
-    public ResponseEntity<List<Message>> getAll() {
-        return ResponseEntity.ok(messageService.getAll());
-    }
-
+    /**
+     * The messages in a thread the caller belongs to. "GET /api/messages" returned the entire
+     * message history of every conversation in the marketplace to any authenticated caller; that
+     * endpoint no longer exists, so there is no way to page through other people's private mail.
+     */
     @GetMapping("/conversation/{conversationId}")
-    public ResponseEntity<List<Message>> getByConversation(@PathVariable UUID conversationId) {
-        return ResponseEntity.ok(messageService.getByConversation(conversationId));
+    public ResponseEntity<List<Message>> getByConversation(@PathVariable UUID conversationId,
+                                                           Authentication authentication) {
+        return ResponseEntity.ok(messageService.getByConversation(
+                conversationId, CurrentCaller.id(authentication)));
     }
 
     @GetMapping("/conversation/{conversationId}/unread-count")
-    public ResponseEntity<Long> unreadCount(@PathVariable UUID conversationId) {
-        return ResponseEntity.ok(messageService.unreadCount(conversationId));
+    public ResponseEntity<Long> unreadCount(@PathVariable UUID conversationId,
+                                            Authentication authentication) {
+        return ResponseEntity.ok(messageService.unreadCount(
+                conversationId, CurrentCaller.id(authentication)));
     }
 
+    /**
+     * Sends a message as the caller. The senderId parameter is gone: it was read from the request,
+     * so anyone could post into a thread under somebody else's name.
+     */
     @PostMapping("/conversation/{conversationId}/send")
     public ResponseEntity<Message> send(@PathVariable UUID conversationId,
-                                        @RequestParam UUID senderId,
-                                        @RequestParam String body) {
-        Message sent = messageService.send(conversationId, senderId, body);
+                                        @RequestParam String body,
+                                        Authentication authentication) {
+        Message sent = messageService.send(conversationId, CurrentCaller.id(authentication), body);
         if (sent == null) {
             return ResponseEntity.badRequest().build();
         }
         return new ResponseEntity<>(sent, HttpStatus.CREATED);
     }
 
+    /**
+     * Marks the caller's own unread messages in the thread as read. The readerId parameter is gone
+     * for the same reason as senderId above.
+     */
     @PatchMapping("/conversation/{conversationId}/read")
     public ResponseEntity<Map<String, Integer>> markRead(@PathVariable UUID conversationId,
-                                                         @RequestParam UUID readerId) {
-        int updated = messageService.markRead(conversationId, readerId);
+                                                         Authentication authentication) {
+        int updated = messageService.markRead(conversationId, CurrentCaller.id(authentication));
         return ResponseEntity.ok(Map.of("markedRead", updated));
+    }
+
+    /** @return 404 unless the caller is a participant in the message's conversation */
+    @GetMapping("/{id}")
+    public ResponseEntity<Message> read(@PathVariable UUID id, Authentication authentication) {
+        Message message = messageService.read(id, CurrentCaller.id(authentication));
+        if (message == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(message);
     }
 }

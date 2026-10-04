@@ -52,6 +52,16 @@ class ProductFactoryTest {
         assertNull(product.getDescription());
     }
 
+    @Test
+    void createProduct_carriesTheVendorOntoTheProduct() {
+        Product product = ProductFactory.createProduct(
+                "Laptop", "15 inch", new BigDecimal("9999.99"), "Electronics", 7, vendorId);
+
+        // products.vendor_id is NOT NULL, so dropping the vendor here produced unusable products.
+        assertNotNull(product.getVendor());
+        assertEquals(vendorId, product.getVendor().getId());
+    }
+
     // Validation
 
     @ParameterizedTest

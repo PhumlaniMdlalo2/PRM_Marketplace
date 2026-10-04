@@ -5,8 +5,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,9 +31,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
-@WebMvcTest(AddressController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@SpringBootTest
+@AutoConfigureMockMvc
 class AddressControllerTest {
 
     @Autowired
@@ -44,202 +46,173 @@ class AddressControllerTest {
     @MockitoBean
     private IAddressService addressService;
 
-    private UUID id;
-    private UUID userId;
+    private UUID callerId;
+    private UUID intruderId;
+    private UUID addressId;
     private Address address;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
-        userId = UUID.randomUUID();
-        address = buildAddress();
-    }
-
-    private Address buildAddress() {
-        return new Address.Builder()
-                .setId(id)
-                .setUser(new User.Builder()
-                        .setId(userId)
-                        .setName("Resident")
-                        .setEmail("resident@example.com")
-                        .setPasswordHash("hash")
-                        .build())
-                .setLine1("12 Main Road")
+        callerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        addressId = UUID.randomUUID();
+        address = new Address.Builder()
+                .setId(addressId)
+                .setUser(buildUser(callerId))
+                .setLine1("1 Main Road")
+                .setSuburb("Rondebosch")
                 .setCity("Cape Town")
                 .setProvince("Western Cape")
-                .setPostalCode("8001")
                 .setCountry("South Africa")
-                .setSuburb("Observatory")
                 .build();
     }
 
     @Test
-    @DisplayName("create returns 201 with the created address")
-    void create_returnsCreated() throws Exception {
-        when(addressService.create(any(Address.class))).thenReturn(address);
+    @DisplayName("creating an address files it under the caller, not the userId in the body")
+    void create_takesTheOwnerFromTheToken() throws Exception {
+        when(addressService.create(any(), eq(callerId))).thenReturn(address);
+
+        // The body names a different account. It must not become the owner.
+        Address hostile = new Address.Builder()
+                .copy(address)
+                .setUser(buildUser(intruderId))
+                .build();
 
         mockMvc.perform(post("/api/addresses")
+                        .with(asStudent(callerId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(address)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.line1").value("12 Main Road"))
-                .andExpect(jsonPath("$.city").value("Cape Town"));
-    }
-
-    @Test
-    @DisplayName("create returns 400 when the service refuses")
-    void create_returnsBadRequest() throws Exception {
-        when(addressService.create(any(Address.class))).thenReturn(null);
-
-        mockMvc.perform(post("/api/addresses")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(address)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("create never leaks the owner back to the client")
-    void create_doesNotEchoOwner() throws Exception {
-        when(addressService.create(any(Address.class))).thenReturn(address);
-
-        String body = mockMvc.perform(post("/api/addresses")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(address)))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("passwordHash").doesNotContain("\"user\"");
-    }
-
-    @Test
-    @DisplayName("read returns the address")
-    void read_returnsAddress() throws Exception {
-        when(addressService.read(id)).thenReturn(address);
-
-        mockMvc.perform(get("/api/addresses/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("read returns 404 for an unknown address")
-    void read_returnsNotFound() throws Exception {
-        when(addressService.read(id)).thenReturn(null);
-
-        mockMvc.perform(get("/api/addresses/{id}", id))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("read with a non-UUID id returns 400")
-    void read_withMalformedId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get("/api/addresses/not-a-uuid"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("update forces the path id onto the entity")
-    void update_usesPathId() throws Exception {
-        when(addressService.read(id)).thenReturn(address);
-        when(addressService.update(any(Address.class))).thenReturn(address);
-
-        mockMvc.perform(put("/api/addresses/{id}", id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(address)))
-                .andExpect(status().isOk());
+                        .content(objectMapper.writeValueAsString(hostile)))
+                .andExpect(status().isCreated());
 
         ArgumentCaptor<Address> captor = ArgumentCaptor.forClass(Address.class);
-        verify(addressService).update(captor.capture());
-        assertThat(captor.getValue().getId()).isEqualTo(id);
+        verify(addressService).create(captor.capture(), eq(callerId));
+        // The service ignores the body's owner and assigns the caller; the controller proves it
+        // never forwards the intruder id by passing the caller's own id as the second argument.
+        assertThat(captor.getValue().getLine1()).isEqualTo("1 Main Road");
     }
 
     @Test
-    @DisplayName("update returns 404 when the address is unknown")
-    void update_returnsNotFound() throws Exception {
-        when(addressService.read(id)).thenReturn(null);
+    @DisplayName("creating an address returns 400 when it cannot be saved")
+    void create_returnsBadRequestWhenServiceReturnsNull() throws Exception {
+        when(addressService.create(any(), eq(callerId))).thenReturn(null);
 
-        mockMvc.perform(put("/api/addresses/{id}", id)
+        mockMvc.perform(post("/api/addresses")
+                        .with(asStudent(callerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(address)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("the address list is the caller's, and the /user/{userId} route is gone")
+    void getAll_isScopedToTheCaller() throws Exception {
+        when(addressService.getByUser(callerId)).thenReturn(List.of(address));
+
+        mockMvc.perform(get("/api/addresses").with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(addressId.toString()));
+
+        verify(addressService).getByUser(callerId);
+
+        mockMvc.perform(get("/api/addresses/user/" + intruderId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("reading an address that is not the caller's returns 404")
+    void read_returnsNotFoundForAnotherAccountsAddress() throws Exception {
+        when(addressService.read(addressId, callerId)).thenReturn(null);
+
+        mockMvc.perform(get("/api/addresses/" + addressId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("updating an address that is not the caller's returns 404")
+    void update_returnsNotFoundForAnotherAccountsAddress() throws Exception {
+        when(addressService.update(any(), eq(callerId))).thenReturn(null);
+
+        mockMvc.perform(put("/api/addresses/" + addressId)
+                        .with(asStudent(callerId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(address)))
                 .andExpect(status().isNotFound());
 
-        verify(addressService, never()).update(any());
+        verify(addressService).update(any(), eq(callerId));
     }
 
     @Test
-    @DisplayName("delete returns 204 on success")
-    void delete_returnsNoContent() throws Exception {
-        when(addressService.delete(id)).thenReturn(true);
+    @DisplayName("updating the caller's own address succeeds")
+    void update_returnsUpdatedAddress() throws Exception {
+        when(addressService.update(any(), eq(callerId))).thenReturn(address);
 
-        mockMvc.perform(delete("/api/addresses/{id}", id))
+        mockMvc.perform(put("/api/addresses/" + addressId)
+                        .with(asStudent(callerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(address)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(addressId.toString()));
+    }
+
+    @Test
+    @DisplayName("deleting an address that is not the caller's returns 404")
+    void delete_returnsNotFoundForAnotherAccountsAddress() throws Exception {
+        when(addressService.delete(addressId, callerId)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/addresses/" + addressId).with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("deleting the caller's own address succeeds")
+    void delete_returnsNoContent() throws Exception {
+        when(addressService.delete(addressId, callerId)).thenReturn(true);
+
+        mockMvc.perform(delete("/api/addresses/" + addressId).with(asStudent(callerId)))
                 .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("delete returns 404 when the address is unknown")
-    void delete_returnsNotFound() throws Exception {
-        when(addressService.delete(id)).thenReturn(false);
+    @DisplayName("the default address is the caller's, and the /user/{userId} route is gone")
+    void getDefault_isScopedToTheCaller() throws Exception {
+        when(addressService.getDefaultForUser(callerId)).thenReturn(address);
 
-        mockMvc.perform(delete("/api/addresses/{id}", id))
+        mockMvc.perform(get("/api/addresses/default").with(asStudent(callerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(addressId.toString()));
+
+        mockMvc.perform(get("/api/addresses/user/" + callerId + "/default").with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("getAll returns every address")
-    void getAll_returnsList() throws Exception {
-        when(addressService.getAll()).thenReturn(List.of(address));
+    @DisplayName("the default address returns 404 when the caller has none")
+    void getDefault_returnsNotFoundWhenNoneSet() throws Exception {
+        when(addressService.getDefaultForUser(callerId)).thenReturn(null);
 
-        mockMvc.perform(get("/api/addresses"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getByUser returns the user's addresses")
-    void getByUser_returnsList() throws Exception {
-        when(addressService.getByUser(userId)).thenReturn(List.of(address));
-
-        mockMvc.perform(get("/api/addresses/user/{userId}", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getDefault returns the default address")
-    void getDefault_returnsAddress() throws Exception {
-        when(addressService.getDefaultForUser(userId)).thenReturn(address);
-
-        mockMvc.perform(get("/api/addresses/user/{userId}/default", userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-    }
-
-    @Test
-    @DisplayName("getDefault returns 404 when the user has no default")
-    void getDefault_returnsNotFound() throws Exception {
-        when(addressService.getDefaultForUser(userId)).thenReturn(null);
-
-        mockMvc.perform(get("/api/addresses/user/{userId}/default", userId))
+        mockMvc.perform(get("/api/addresses/default").with(asStudent(callerId)))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("setDefault promotes an address")
-    void setDefault_returnsAddress() throws Exception {
-        when(addressService.setDefault(id)).thenReturn(address);
+    @DisplayName("setting a default address that is not the caller's returns 404")
+    void setDefault_returnsNotFoundForAnotherAccountsAddress() throws Exception {
+        when(addressService.setDefault(addressId, callerId)).thenReturn(null);
 
-        mockMvc.perform(patch("/api/addresses/{id}/default", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
+        mockMvc.perform(patch("/api/addresses/" + addressId + "/default").with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("setDefault returns 404 for an unknown address")
-    void setDefault_returnsNotFound() throws Exception {
-        when(addressService.setDefault(id)).thenReturn(null);
+    @DisplayName("address endpoints reject anonymous callers")
+    void requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/addresses")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/addresses/" + addressId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/addresses/" + addressId)).andExpect(status().isUnauthorized());
+        verify(addressService, never()).getByUser(any());
+    }
 
-        mockMvc.perform(patch("/api/addresses/{id}/default", id))
-                .andExpect(status().isNotFound());
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }
 }

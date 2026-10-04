@@ -8,7 +8,6 @@ import za.ac.cput.prm_marketplace.factory.NotificationFactory;
 import za.ac.cput.prm_marketplace.repository.NotificationRepository;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,117 +21,83 @@ public class NotificationServiceImpl implements INotificationService {
     }
 
     @Override
-    public Notification create(Notification notification) {
+    public Notification send(UUID userId, NotificationType type, String title, String message) {
+        if (userId == null || type == null) {
+            return null;
+        }
+        Notification notification =
+                NotificationFactory.createNotification(userId, type, title, message);
         if (notification == null) {
-            return null;
-        }
-        // Go through the factory so new notifications always start unread
-        // and have a createdAt timestamp, whatever the client sent.
-        return send(notification.getUserId(), notification.getType(),
-                notification.getTitle(), notification.getMessage());
-    }
-
-    @Override
-    public Notification read(UUID id) {
-        if (id == null) {
-            return null;
-        }
-        return notificationRepository.findById(id).orElse(null);
-    }
-
-    @Override
-    public Notification update(Notification notification) {
-        if (notification == null || notification.getId() == null ||
-                !notificationRepository.existsById(notification.getId())) {
             return null;
         }
         return notificationRepository.save(notification);
     }
 
     @Override
-    public boolean delete(UUID id) {
-        if (id == null || !notificationRepository.existsById(id)) {
+    public Notification read(UUID id, UUID requesterId) {
+        Notification notification = find(id);
+        return isAddressedTo(notification, requesterId) ? notification : null;
+    }
+
+    @Override
+    @Transactional
+    public boolean delete(UUID id, UUID requesterId) {
+        if (read(id, requesterId) == null) {
             return false;
         }
-
         notificationRepository.deleteById(id);
         return true;
     }
 
     @Override
-    public List<Notification> getAll() {
-        return notificationRepository.findAll();
-    }
-
-    @Override
-    public Notification send(UUID userId, NotificationType type, String title, String message) {
-        Notification notification =
-                NotificationFactory.createNotification(userId, type, title, message);
-
-        if (notification == null) {
-            return null;
+    public List<Notification> getByUserId(UUID requesterId) {
+        if (requesterId == null) {
+            return List.of();
         }
-        return notificationRepository.save(notification);
+        return notificationRepository.findByUserIdOrderByCreatedAtDesc(requesterId);
     }
 
     @Override
-    public List<Notification> getByUserId(UUID userId) {
-        if (userId == null) {
-            return Collections.emptyList();
+    public List<Notification> getUnreadByUserId(UUID requesterId) {
+        if (requesterId == null) {
+            return List.of();
         }
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        return notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(requesterId);
     }
 
     @Override
-    public List<Notification> getUnreadByUserId(UUID userId) {
-        if (userId == null) {
-            return Collections.emptyList();
-        }
-        return notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
-    }
-
-    @Override
-    public long countUnread(UUID userId) {
-        if (userId == null) {
+    public long countUnread(UUID requesterId) {
+        if (requesterId == null) {
             return 0;
         }
-        return notificationRepository.countByUserIdAndReadFalse(userId);
+        return notificationRepository.countByUserIdAndReadFalse(requesterId);
     }
 
     @Override
-    public Notification markAsRead(UUID id) {
-        Notification existing = read(id);
-
-        if (existing == null) {
-            return null;
-        }
-
-        if (existing.isRead()) {
+    @Transactional
+    public Notification markAsRead(UUID id, UUID requesterId) {
+        Notification existing = read(id, requesterId);
+        if (existing == null || existing.isRead()) {
             return existing;
         }
-
         Notification updated = new Notification.Builder()
                 .copy(existing)
                 .setRead(true)
                 .build();
-
         return notificationRepository.save(updated);
     }
 
     @Override
     @Transactional
-    public int markAllAsRead(UUID userId) {
-        if (userId == null) {
+    public int markAllAsRead(UUID requesterId) {
+        if (requesterId == null) {
             return 0;
         }
-
         List<Notification> unread =
-                notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
-
+                notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(requesterId);
         if (unread.isEmpty()) {
             return 0;
         }
-
         List<Notification> updated = new ArrayList<>();
         for (Notification notification : unread) {
             updated.add(new Notification.Builder()
@@ -140,8 +105,20 @@ public class NotificationServiceImpl implements INotificationService {
                     .setRead(true)
                     .build());
         }
-
         notificationRepository.saveAll(updated);
         return updated.size();
+    }
+
+    private Notification find(UUID id) {
+        if (id == null) {
+            return null;
+        }
+        return notificationRepository.findById(id).orElse(null);
+    }
+
+    private boolean isAddressedTo(Notification notification, UUID requesterId) {
+        return notification != null
+                && notification.getUserId() != null
+                && notification.getUserId().equals(requesterId);
     }
 }

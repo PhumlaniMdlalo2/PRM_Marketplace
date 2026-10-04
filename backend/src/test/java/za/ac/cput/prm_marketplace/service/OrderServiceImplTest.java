@@ -6,12 +6,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
 import za.ac.cput.prm_marketplace.domain.Product;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.repository.AddressRepository;
+import za.ac.cput.prm_marketplace.repository.CartItemRepository;
 import za.ac.cput.prm_marketplace.repository.OrderRepository;
+import za.ac.cput.prm_marketplace.repository.ProductRepository;
+import za.ac.cput.prm_marketplace.repository.OrderItemRepository;
+import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -20,15 +27,31 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * The interesting cases here are the ones where a caller asks for something they should not get,
+ * and the ones where two buyers want the last item at the same time.
+ */
 @ExtendWith(MockitoExtension.class)
 class OrderServiceImplTest {
 
     @Mock
     private OrderRepository orderRepository;
+    @Mock
+    private UserRepository userRepository;
+    @Mock
+    private ProductRepository productRepository;
+    @Mock
+    private CartItemRepository cartItemRepository;
+    @Mock
+    private AddressRepository addressRepository;
+    @Mock
+    private OrderItemRepository orderItemRepository;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -59,48 +82,463 @@ class OrderServiceImplTest {
                 .build();
     }
 
-    @Test
-    @DisplayName("create persists the order")
-    void create_saves() {
-        Order order = new Order.Builder().setId(UUID.randomUUID()).setBuyer(buildBuyer()).build();
-        when(orderRepository.save(order)).thenReturn(order);
+    // ---------- read / update / delete scoping ----------
 
-        assertThat(orderService.create(order)).isSameAs(order);
+    @Test
+    @DisplayName("read only matches an order the caller actually owns")
+    void read_looksUpByBuyer() {
+        UUID id = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        Order owned = new Order.Builder().setId(id).setBuyer(buildBuyer()).build();
+        when(orderRepository.findByIdAndBuyerId(id, callerId)).thenReturn(Optional.of(owned));
+
+        assertThat(orderService.read(id, callerId)).isSameAs(owned);
     }
 
     @Test
-    @DisplayName("create with null returns null")
-    void create_withNull_returnsNull() {
-        assertThat(orderService.create(null)).isNull();
+    @DisplayName("read returns null for an order belonging to somebody else")
+    void read_otherUsersOrder_returnsNull() {
+        UUID id = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        // The buyer-scoped lookup finds nothing, which is the whole point of using it.
+        when(orderRepository.findByIdAndBuyerId(id, callerId)).thenReturn(Optional.empty());
+
+        assertThat(orderService.read(id, callerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("read rejects null arguments")
+    void read_rejectsNulls() {
+        assertThat(orderService.read(null, UUID.randomUUID())).isNull();
+        assertThat(orderService.read(UUID.randomUUID(), null)).isNull();
+    }
+
+    @Test
+    @DisplayName("update refuses an order the caller does not own")
+    void update_otherUsersOrder_returnsNull() {
+        UUID callerId = UUID.randomUUID();
+        Order incoming = new Order.Builder().setId(UUID.randomUUID()).setBuyer(buildBuyer()).build();
+        when(orderRepository.findByIdAndBuyerId(incoming.getId(), callerId)).thenReturn(Optional.empty());
+
+        assertThat(orderService.update(incoming, callerId)).isNull();
         verify(orderRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("read missing order returns null")
-    void read_missing_returnsNull() {
+    @DisplayName("update leaves status and total alone")
+    void update_doesNotLetTheBodyRewriteServerOwnedFields() {
+        UUID callerId = UUID.randomUUID();
+        User buyer = buildBuyer();
+        Order existing = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buyer)
+                .setStatus(OrderStatus.PENDING)
+                .setTotalAmount(new BigDecimal("250.00"))
+                .build();
+        when(orderRepository.findByIdAndBuyerId(existing.getId(), callerId)).thenReturn(Optional.of(existing));
+        when(orderRepository.save(existing)).thenReturn(existing);
+
+        Order body = new Order.Builder()
+                .setId(existing.getId())
+                .setStatus(OrderStatus.SHIPPED)
+                .setTotalAmount(new BigDecimal("0.01"))
+                .build();
+
+        Order updated = orderService.update(body, callerId);
+
+        assertThat(updated.getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(updated.getTotalAmount()).isEqualByComparingTo("250.00");
+    }
+
+    @Test
+    @DisplayName("update refuses a shipping address belonging to somebody else")
+    void update_rejectsForeignShippingAddress() {
+        UUID callerId = UUID.randomUUID();
+        Order existing = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        UUID foreignAddressId = UUID.randomUUID();
+        when(orderRepository.findByIdAndBuyerId(existing.getId(), callerId)).thenReturn(Optional.of(existing));
+        // The address exists, but it is registered to another account.
+        when(addressRepository.findById(foreignAddressId))
+                .thenReturn(Optional.of(new Address.Builder().setId(foreignAddressId).setUser(buildBuyer()).build()));
+
+        Order body = new Order.Builder()
+                .setId(existing.getId())
+                .setShippingAddress(new Address.Builder().setId(foreignAddressId).build())
+                .build();
+
+        assertThat(orderService.update(body, callerId)).isNull();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("update is refused once the order has moved past PENDING")
+    void update_refusedAfterProgress() {
+        UUID callerId = UUID.randomUUID();
+        Order existing = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.SHIPPED)
+                .build();
+        when(orderRepository.findByIdAndBuyerId(existing.getId(), callerId)).thenReturn(Optional.of(existing));
+
+        Order body = new Order.Builder().setId(existing.getId()).build();
+
+        assertThat(orderService.update(body, callerId)).isNull();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("delete reports false for an order the caller does not own")
+    void delete_otherUsersOrder_returnsFalse() {
         UUID id = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        when(orderRepository.findByIdAndBuyerId(id, callerId)).thenReturn(Optional.empty());
+
+        assertThat(orderService.delete(id, callerId)).isFalse();
+        verify(orderRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("getAll is scoped to the caller rather than returning every row")
+    void getAll_scopesToCaller() {
+        UUID callerId = UUID.randomUUID();
+        when(orderRepository.findByBuyerIdOrderByCreatedAtDesc(callerId)).thenReturn(List.of());
+
+        orderService.getAll(callerId);
+
+        verify(orderRepository).findByBuyerIdOrderByCreatedAtDesc(callerId);
+        verify(orderRepository, never()).findAll();
+    }
+
+    // ---------- status transitions ----------
+
+    @Test
+    @DisplayName("updateStatus changes the status for a vendor selling on the order")
+    void updateStatus_existing_persists() {
+        UUID vendorId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orderItemRepository.existsByOrderIdAndVendorUserId(order.getId(), vendorId))
+                .thenReturn(true);
+        when(orderRepository.save(order)).thenReturn(order);
+
+        Order updated = orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED, vendorId, Role.VENDOR);
+
+        assertThat(updated).isSameAs(order);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("a vendor cannot advance an order that holds none of their products")
+    void updateStatus_refusedForUnrelatedVendor() {
+        UUID sellerId = UUID.randomUUID();
+        UUID intruderId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orderItemRepository.existsByOrderIdAndVendorUserId(order.getId(), intruderId))
+                .thenReturn(false);
+
+        assertThat(orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED, intruderId, Role.VENDOR))
+                .isNull();
+        // Ownership is refused before the transition is even considered, so nothing is written.
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("faculty may advance any order without selling anything on it")
+    void updateStatus_facultyNeedsNoProductOwnership() {
+        UUID facultyId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orderRepository.save(order)).thenReturn(order);
+
+        Order updated = orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED, facultyId, Role.FACULTY);
+
+        assertThat(updated).isSameAs(order);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(orderItemRepository, never()).existsByOrderIdAndVendorUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("a cancelled order cannot be reopened to delivered")
+    void updateStatus_refusesReopeningATerminalOrder() {
+        UUID facultyId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.CANCELLED)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        assertThat(orderService.updateStatus(order.getId(), OrderStatus.DELIVERED, facultyId, Role.FACULTY))
+                .isNull();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an order cannot skip straight from pending to delivered")
+    void updateStatus_refusesSkippingTheLifecycle() {
+        UUID facultyId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        assertThat(orderService.updateStatus(order.getId(), OrderStatus.DELIVERED, facultyId, Role.FACULTY))
+                .isNull();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a delivered order cannot be moved back to pending")
+    void updateStatus_refusesGoingBackwards() {
+        UUID facultyId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.DELIVERED)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        assertThat(orderService.updateStatus(order.getId(), OrderStatus.PENDING, facultyId, Role.FACULTY))
+                .isNull();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a plain student cannot advance an order's status")
+    void updateStatus_refusedForStudent() {
+        UUID id = UUID.randomUUID();
+
+        assertThat(orderService.updateStatus(id, OrderStatus.SHIPPED, UUID.randomUUID(), Role.STUDENT)).isNull();
+        // The role check happens before any lookup, so a student never even reaches the order.
+        verify(orderRepository, never()).findById(any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("updateStatus rejects null arguments and unknown orders")
+    void updateStatus_rejectsInvalidInput() {
+        UUID id = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        assertThat(orderService.updateStatus(null, OrderStatus.SHIPPED, callerId, Role.VENDOR)).isNull();
+        assertThat(orderService.updateStatus(id, null, callerId, Role.VENDOR)).isNull();
+        assertThat(orderService.updateStatus(id, OrderStatus.SHIPPED, null, Role.VENDOR)).isNull();
+
         when(orderRepository.findById(id)).thenReturn(Optional.empty());
+        assertThat(orderService.updateStatus(id, OrderStatus.SHIPPED, callerId, Role.VENDOR)).isNull();
+    }
 
-        assertThat(orderService.read(id)).isNull();
+    // ---------- checkout ----------
+
+    @Test
+    @DisplayName("checkout prices the order from the catalogue, not the cart")
+    void checkout_pricesFromCatalog() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("100.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 2)));
+        when(productRepository.decrementStock(product.getId(), 2)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Order order = orderService.checkout(buyer.getId(), null);
+
+        assertThat(order).isNotNull();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(order.getItems()).hasSize(1);
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("200.00");
     }
 
     @Test
-    @DisplayName("update requires an existing order")
-    void update_missing_returnsNull() {
-        Order order = new Order.Builder().setId(UUID.randomUUID()).setBuyer(buildBuyer()).build();
-        when(orderRepository.existsById(order.getId())).thenReturn(false);
+    @DisplayName("checkout refuses to oversell: a failed reservation aborts the order")
+    void checkout_refusesWhenStockIsInsufficient() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("100.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 5)));
+        // Zero rows means somebody else took the units first.
+        when(productRepository.decrementStock(product.getId(), 5)).thenReturn(0);
 
-        assertThat(orderService.update(order)).isNull();
+        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+        verify(orderRepository, never()).save(any());
+        verify(cartItemRepository, never()).deleteAll(any());
     }
 
     @Test
-    @DisplayName("delete reports false for an unknown order")
-    void delete_missing_returnsFalse() {
+    @DisplayName("checkout ignores cart rows belonging to other users")
+    void checkout_usesOnlyTheCallersCart() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("10.00"));
+        UUID strangerId = UUID.randomUUID();
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        // The caller's own cart is empty. Another user's cart exists but must never be consulted.
+        when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of());
+
+        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+        verify(cartItemRepository, never()).findByUser_Id(strangerId);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("checkout refuses a shipping address owned by somebody else")
+    void checkout_rejectsForeignShippingAddress() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("10.00"));
+        UUID foreignAddressId = UUID.randomUUID();
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 1)));
+        when(addressRepository.findById(foreignAddressId))
+                .thenReturn(Optional.of(new Address.Builder()
+                        .setId(foreignAddressId).setUser(buildBuyer()).build()));
+
+        assertThat(orderService.checkout(buyer.getId(), foreignAddressId)).isNull();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("checkout needs a known buyer and a non-empty cart")
+    void checkout_requiresBuyerAndItems() {
+        UUID unknown = UUID.randomUUID();
+        when(userRepository.findById(unknown)).thenReturn(Optional.empty());
+        assertThat(orderService.checkout(unknown, null)).isNull();
+        assertThat(orderService.checkout(null, null)).isNull();
+
+        User buyer = buildBuyer();
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of());
+        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("checkout only empties the cart lines it actually ordered")
+    void checkout_clearsOnlyPurchasedLines() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("25.00"));
+        CartItem purchased = buildCartItem(product, 1);
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(purchased, buildCartItem(null, 1)));
+        when(productRepository.decrementStock(product.getId(), 1)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        orderService.checkout(buyer.getId(), null);
+
+        verify(cartItemRepository).deleteAll(List.of(purchased));
+    }
+
+    // ---------- cancel ----------
+
+    @Test
+    @DisplayName("cancel is allowed while an order is pending or confirmed")
+    void cancel_allowedStatuses() {
+        for (OrderStatus status : List.of(OrderStatus.PENDING, OrderStatus.CONFIRMED)) {
+            UUID id = UUID.randomUUID();
+            UUID buyerId = UUID.randomUUID();
+            Order order = new Order.Builder()
+                    .setId(id)
+                    .setBuyer(buildBuyer())
+                    .setStatus(status)
+                    .build();
+            when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.of(order));
+            when(orderRepository.save(order)).thenReturn(order);
+
+            assertThat(orderService.cancel(id, buyerId)).as("status %s", status).isTrue();
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        }
+    }
+
+    @Test
+    @DisplayName("cancelling puts the reserved stock back")
+    void cancel_restocks() {
         UUID id = UUID.randomUUID();
-        when(orderRepository.existsById(id)).thenReturn(false);
+        UUID buyerId = UUID.randomUUID();
+        Product product = buildProduct(new BigDecimal("10.00"));
+        Order order = new Order.Builder()
+                .setId(id)
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        order.addItem(new za.ac.cput.prm_marketplace.domain.OrderItem.Builder()
+                .setOrder(order)
+                .setProduct(product)
+                .setQuantity(3)
+                .setPriceAtPurchase(new BigDecimal("10.00"))
+                .build());
+        when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(order)).thenReturn(order);
 
-        assertThat(orderService.delete(id)).isFalse();
+        assertThat(orderService.cancel(id, buyerId)).isTrue();
+
+        verify(productRepository).incrementStock(product.getId(), 3);
     }
+
+    @Test
+    @DisplayName("cancel is refused once the order has shipped or completed")
+    void cancel_refusedAfterDispatch() {
+        for (OrderStatus status : List.of(OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED)) {
+            UUID id = UUID.randomUUID();
+            UUID buyerId = UUID.randomUUID();
+            Order order = new Order.Builder()
+                    .setId(id)
+                    .setBuyer(buildBuyer())
+                    .setStatus(status)
+                    .build();
+            when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.of(order));
+
+            assertThat(orderService.cancel(id, buyerId)).as("status %s", status).isFalse();
+            assertThat(order.getStatus()).isEqualTo(status);
+            verify(productRepository, never()).incrementStock(any(), anyInt());
+        }
+    }
+
+    @Test
+    @DisplayName("cancel only matches orders owned by the given buyer")
+    void cancel_wrongBuyer_returnsFalse() {
+        UUID id = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.empty());
+
+        assertThat(orderService.cancel(id, buyerId)).isFalse();
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("cancel rejects null arguments")
+    void cancel_rejectsNulls() {
+        assertThat(orderService.cancel(null, UUID.randomUUID())).isFalse();
+        assertThat(orderService.cancel(UUID.randomUUID(), null)).isFalse();
+    }
+
+    // ---------- totals ----------
 
     @Test
     @DisplayName("getByBuyer with null id returns empty")
@@ -153,135 +591,21 @@ class OrderServiceImplTest {
     }
 
     @Test
-    @DisplayName("checkout converts the cart into a pending order with line items")
-    void checkout_buildsPendingOrder() {
-        Product product = buildProduct(new BigDecimal("100.00"));
+    @DisplayName("a saved order keeps the buyer the service resolved, not the request")
+    void checkout_setsBuyerFromRepository() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("5.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 1)));
+        when(productRepository.decrementStock(product.getId(), 1)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
         when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Order order = orderService.checkout(
-                buildBuyer(),
-                List.of(buildCartItem(product, 2), buildCartItem(buildProduct(new BigDecimal("5.00")), 1)),
-                null);
+        Order order = orderService.checkout(buyer.getId(), null);
 
-        assertThat(order).isNotNull();
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
-        assertThat(order.getTotalAmount()).isEqualByComparingTo("205.00");
-        assertThat(order.getItems()).hasSize(2);
-        assertThat(order.getItems())
-                .allSatisfy(item -> assertThat(item.getOrder()).isSameAs(order));
-        assertThat(order.getItems())
-                .filteredOn(item -> item.getProduct().equals(product))
-                .singleElement()
-                .satisfies(item -> {
-                    assertThat(item.getQuantity()).isEqualTo(2);
-                    assertThat(item.getPriceAtPurchase()).isEqualByComparingTo("100.00");
-                });
-    }
-
-    @Test
-    @DisplayName("checkout needs a buyer and a non-empty cart")
-    void checkout_requiresBuyerAndItems() {
-        assertThat(orderService.checkout(null, List.of(buildCartItem(buildProduct(BigDecimal.ONE), 1)), null))
-                .isNull();
-        assertThat(orderService.checkout(buildBuyer(), List.of(), null)).isNull();
-        assertThat(orderService.checkout(buildBuyer(), null, null)).isNull();
-        verify(orderRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("checkout fails when no cart item carries a product")
-    void checkout_withoutProducts_returnsNull() {
-        CartItem noProduct = new CartItem.Builder()
-                .id(UUID.randomUUID())
-                .user(buildBuyer())
-                .quantity(1)
-                .build();
-
-        assertThat(orderService.checkout(buildBuyer(), List.of(noProduct), null)).isNull();
-        verify(orderRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("updateStatus changes the status of an existing order")
-    void updateStatus_existing_persists() {
-        Order order = new Order.Builder()
-                .setId(UUID.randomUUID())
-                .setBuyer(buildBuyer())
-                .setStatus(OrderStatus.PENDING)
-                .build();
-        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
-        when(orderRepository.save(order)).thenReturn(order);
-
-        Order updated = orderService.updateStatus(order.getId(), OrderStatus.SHIPPED);
-
-        assertThat(updated).isSameAs(order);
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.SHIPPED);
-    }
-
-    @Test
-    @DisplayName("updateStatus rejects null arguments and unknown orders")
-    void updateStatus_rejectsInvalidInput() {
-        UUID id = UUID.randomUUID();
-        assertThat(orderService.updateStatus(null, OrderStatus.SHIPPED)).isNull();
-        assertThat(orderService.updateStatus(id, null)).isNull();
-
-        when(orderRepository.findById(id)).thenReturn(Optional.empty());
-        assertThat(orderService.updateStatus(id, OrderStatus.SHIPPED)).isNull();
-    }
-
-    @Test
-    @DisplayName("cancel is allowed while an order is pending or confirmed")
-    void cancel_allowedStatuses() {
-        for (OrderStatus status : List.of(OrderStatus.PENDING, OrderStatus.CONFIRMED)) {
-            UUID id = UUID.randomUUID();
-            UUID buyerId = UUID.randomUUID();
-            Order order = new Order.Builder()
-                    .setId(id)
-                    .setBuyer(buildBuyer())
-                    .setStatus(status)
-                    .build();
-            when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.of(order));
-            when(orderRepository.save(order)).thenReturn(order);
-
-            assertThat(orderService.cancel(id, buyerId)).as("status %s", status).isTrue();
-            assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        }
-    }
-
-    @Test
-    @DisplayName("cancel is refused once the order has shipped or completed")
-    void cancel_refusedAfterDispatch() {
-        for (OrderStatus status : List.of(OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED)) {
-            UUID id = UUID.randomUUID();
-            UUID buyerId = UUID.randomUUID();
-            Order order = new Order.Builder()
-                    .setId(id)
-                    .setBuyer(buildBuyer())
-                    .setStatus(status)
-                    .build();
-            when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.of(order));
-
-            assertThat(orderService.cancel(id, buyerId)).as("status %s", status).isFalse();
-            assertThat(order.getStatus()).isEqualTo(status);
-        }
-    }
-
-    @Test
-    @DisplayName("cancel only matches orders owned by the given buyer")
-    void cancel_wrongBuyer_returnsFalse() {
-        UUID id = UUID.randomUUID();
-        UUID buyerId = UUID.randomUUID();
-        when(orderRepository.findByIdAndBuyerId(id, buyerId)).thenReturn(Optional.empty());
-
-        assertThat(orderService.cancel(id, buyerId)).isFalse();
-        verify(orderRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("cancel rejects null arguments")
-    void cancel_rejectsNulls() {
-        assertThat(orderService.cancel(null, UUID.randomUUID())).isFalse();
-        assertThat(orderService.cancel(UUID.randomUUID(), null)).isFalse();
+        assertThat(order.getBuyer().getId()).isEqualTo(buyer.getId());
+        verify(orderRepository).save(eq(order));
     }
 }

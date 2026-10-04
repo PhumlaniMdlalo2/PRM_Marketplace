@@ -1,9 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -12,14 +13,17 @@ public class Message {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "conversation_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Conversation conversation;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "sender_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User sender;
 
     @Column(nullable = false, length = 2000)
@@ -27,11 +31,14 @@ public class Message {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private MessageStatus status = MessageStatus.SENT;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime sentAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime readAt;
 
     protected Message() {
@@ -75,9 +82,19 @@ public class Message {
         return readAt;
     }
 
+    /**
+     * Records that the reader has seen this message.
+     *
+     * <p>The timestamp is only written the first time. Marking an already-read message used to
+     * stamp it again, which quietly moved the read time forward every time the reader reopened the
+     * thread — so the field that is supposed to say when somebody first read the message ended up
+     * recording when they last looked at it.
+     */
     public void markRead() {
         this.status = MessageStatus.READ;
-        this.readAt = LocalDateTime.now();
+        if (this.readAt == null) {
+            this.readAt = LocalDateTime.now();
+        }
     }
 
     public void markDelivered() {
@@ -96,12 +113,12 @@ public class Message {
         if (this == o) return true;
         if (!(o instanceof Message)) return false;
         Message message = (Message) o;
-        return Objects.equals(id, message.id);
+        return id != null && id.equals(message.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

@@ -18,6 +18,9 @@ import java.util.UUID;
 @Service
 public class CartItemServiceImpl implements ICartItemService {
 
+    /** Guards against a request asking for an implausible quantity of a single product. */
+    private static final int MAX_QUANTITY_PER_LINE = 99;
+
     private final CartItemRepository cartItemRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
@@ -31,97 +34,109 @@ public class CartItemServiceImpl implements ICartItemService {
         this.productRepository = productRepository;
     }
 
-
-    @Override
-    public CartItem create(CartItem cartItem) {
-        return cartItemRepository.save(cartItem);
-    }
-
-    @Override
-    public CartItem read(UUID id) {
-        return cartItemRepository.findById(id).orElse(null);
-    }
-
-    @Override
-    public CartItem update(CartItem cartItem) {
-        if (cartItem.getId() != null && cartItemRepository.existsById(cartItem.getId())) {
-            return cartItemRepository.save(cartItem);
-        }
-        return null;
-    }
-
-    @Override
-    public boolean delete(UUID id) {
-        if (cartItemRepository.existsById(id)) {
-            cartItemRepository.deleteById(id);
-            return true;
-        }
-        return false;
-    }
-
-    @Override
-    public List<CartItem> getAll() {
-        return cartItemRepository.findAll();
-    }
-
-
-    @Override
-    public List<CartItem> getByUser(UUID userId) {
-        return cartItemRepository.findByUser_Id(userId);
-    }
-
     @Override
     @Transactional
-    public CartItem addToCart(UUID userId, UUID productId, int quantity) {
-        if (quantity <= 0) {
-            throw new IllegalArgumentException("Quantity must be at least 1");
+    public CartItem addToCart(UUID requesterId, UUID productId, int quantity) {
+        if (requesterId == null || productId == null) {
+            throw new IllegalArgumentException("A product is required");
         }
+        requireSaneQuantity(quantity);
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+        User user = userRepository.findById(requesterId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + requesterId));
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
-
-        Optional<CartItem> existing = cartItemRepository.findByUser_IdAndProduct_Id(userId, productId);
-
-        if (existing.isPresent()) {
-            CartItem current = existing.get();
-            int newQuantity = current.getQuantity() + quantity;
-
-            CartItem updated = new CartItem.Builder()
-                    .copy(current)
-                    .quantity(newQuantity)
-                    .build();
-            return cartItemRepository.save(updated);
+        if (!product.isActive()) {
+            throw new IllegalArgumentException("Product is not available: " + productId);
         }
 
-        CartItem newItem = CartItemFactory.createCartItem(user, product, quantity);
-        return cartItemRepository.save(newItem);
+        Optional<CartItem> existing = cartItemRepository.findByUser_IdAndProduct_Id(requesterId, productId);
+        if (existing.isPresent()) {
+            CartItem current = existing.get();
+            CartItem merged = new CartItem.Builder()
+                    .copy(current)
+                    .quantity(clamp(current.getQuantity() + quantity))
+                    .build();
+            return cartItemRepository.save(merged);
+        }
+
+        return cartItemRepository.save(CartItemFactory.createCartItem(user, product, quantity));
+    }
+
+    @Override
+    public CartItem read(UUID id, UUID requesterId) {
+        CartItem item = find(id);
+        return isOwnedBy(item, requesterId) ? item : null;
     }
 
     @Override
     @Transactional
-    public CartItem updateQuantity(UUID cartItemId, int quantity) {
-        Optional<CartItem> existing = cartItemRepository.findById(cartItemId);
-        if (existing.isEmpty()) {
+    public CartItem updateQuantity(UUID id, UUID requesterId, int quantity) {
+        CartItem existing = read(id, requesterId);
+        if (existing == null) {
             return null;
         }
-
         if (quantity <= 0) {
-            cartItemRepository.deleteById(cartItemId);
+            cartItemRepository.deleteById(id);
             return null;
         }
-
         CartItem updated = new CartItem.Builder()
-                .copy(existing.get())
-                .quantity(quantity)
+                .copy(existing)
+                .quantity(clamp(quantity))
                 .build();
         return cartItemRepository.save(updated);
     }
 
     @Override
     @Transactional
-    public void clearCart(UUID userId) {
-        cartItemRepository.deleteByUser_Id(userId);
+    public boolean delete(UUID id, UUID requesterId) {
+        if (read(id, requesterId) == null) {
+            return false;
+        }
+        cartItemRepository.deleteById(id);
+        return true;
+    }
+
+    @Override
+    public List<CartItem> getByUser(UUID requesterId) {
+        if (requesterId == null) {
+            return List.of();
+        }
+        return cartItemRepository.findByUser_Id(requesterId);
+    }
+
+    @Override
+    @Transactional
+    public void clearCart(UUID requesterId) {
+        if (requesterId != null) {
+            cartItemRepository.deleteByUser_Id(requesterId);
+        }
+    }
+
+    private void requireSaneQuantity(int quantity) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("Quantity must be at least 1");
+        }
+        if (quantity > MAX_QUANTITY_PER_LINE) {
+            throw new IllegalArgumentException("Quantity must not exceed " + MAX_QUANTITY_PER_LINE);
+        }
+    }
+
+    private int clamp(int quantity) {
+        return Math.min(quantity, MAX_QUANTITY_PER_LINE);
+    }
+
+    private CartItem find(UUID id) {
+        if (id == null) {
+            return null;
+        }
+        return cartItemRepository.findById(id).orElse(null);
+    }
+
+    private boolean isOwnedBy(CartItem item, UUID requesterId) {
+        return item != null
+                && item.getUser() != null
+                && item.getUser().getId() != null
+                && item.getUser().getId().equals(requesterId);
     }
 }

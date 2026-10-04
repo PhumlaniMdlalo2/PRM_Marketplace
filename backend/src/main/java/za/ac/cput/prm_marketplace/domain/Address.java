@@ -1,10 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -17,7 +17,7 @@ public class Address {
 
     @ManyToOne
     @JoinColumn(name = "user_id")
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @JsonIgnore
     private User user;
 
     @Column(nullable = false)
@@ -44,6 +44,7 @@ public class Address {
     private boolean defaultAddress;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected Address() {
@@ -148,12 +149,12 @@ public class Address {
         if (this == o) return true;
         if (!(o instanceof Address)) return false;
         Address address = (Address) o;
-        return Objects.equals(id, address.id);
+        return id != null && id.equals(address.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

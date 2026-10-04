@@ -1,10 +1,9 @@
 package za.ac.cput.prm_marketplace.service;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.CartItem;
@@ -14,14 +13,18 @@ import za.ac.cput.prm_marketplace.repository.CartItemRepository;
 import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
-import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class CartItemServiceImplTest {
@@ -35,229 +38,250 @@ class CartItemServiceImplTest {
     @Mock
     private ProductRepository productRepository;
 
-    @InjectMocks
-    private CartItemServiceImpl cartItemService;
+    private CartItemServiceImpl service;
 
-    private UUID cartItemId;
-    private UUID userId;
+    private UUID ownerId;
+    private UUID intruderId;
     private UUID productId;
-    private User user;
-    private Product product;
-    private LocalDateTime addedAt;
-    private CartItem existingItem;
+    private UUID cartItemId;
 
     @BeforeEach
     void setUp() {
-        cartItemId = UUID.randomUUID();
-        userId = UUID.randomUUID();
+        service = new CartItemServiceImpl(cartItemRepository, userRepository, productRepository);
+        ownerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
         productId = UUID.randomUUID();
-        user = mock(User.class);
-        product = mock(Product.class);
-        addedAt = LocalDateTime.of(2026, 9, 10, 8, 30);
+        cartItemId = UUID.randomUUID();
+    }
 
-        existingItem = CartItem.builder()
-                .id(cartItemId)
-                .user(user)
-                .product(product)
-                .quantity(2)
-                .addedAt(addedAt)
+    @Test
+    @DisplayName("adding a product the caller does not already have creates a line")
+    void addToCart_newProductCreatesLine() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.of(buildProduct(true)));
+        when(cartItemRepository.findByUser_IdAndProduct_Id(ownerId, productId))
+                .thenReturn(Optional.empty());
+        when(cartItemRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        CartItem created = service.addToCart(ownerId, productId, 2);
+
+        assertThat(created).isNotNull();
+        assertThat(created.getUser().getId()).isEqualTo(ownerId);
+        assertThat(created.getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("adding a product already in the cart increases the quantity")
+    void addToCart_existingProductIncreasesQuantity() {
+        CartItem existing = buildCartItem(ownerId, 3);
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.of(buildProduct(true)));
+        when(cartItemRepository.findByUser_IdAndProduct_Id(ownerId, productId))
+                .thenReturn(Optional.of(existing));
+        when(cartItemRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        CartItem updated = service.addToCart(ownerId, productId, 2);
+
+        assertThat(updated.getQuantity()).isEqualTo(5);
+        assertThat(updated.getId()).isEqualTo(cartItemId);
+    }
+
+    @Test
+    @DisplayName("a quantity below one is rejected before anything is looked up")
+    void addToCart_rejectsZeroQuantity() {
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, -5))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(cartItemRepository);
+    }
+
+    @Test
+    @DisplayName("an absurd quantity is rejected")
+    void addToCart_rejectsOversizedQuantity() {
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 100_000))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("99");
+
+        verifyNoInteractions(cartItemRepository);
+    }
+
+    @Test
+    @DisplayName("an inactive product cannot be added")
+    void addToCart_rejectsInactiveProduct() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.of(buildProduct(false)));
+
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not available");
+
+        verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an unknown user or product is reported as a bad request")
+    void addToCart_rejectsUnknownEntities() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("adding requires a user and a product")
+    void addToCart_rejectsNulls() {
+        assertThatThrownBy(() -> service.addToCart(null, productId, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.addToCart(ownerId, null, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("read returns the caller's own line")
+    void read_ownedLineIsReturned() {
+        CartItem item = buildCartItem(ownerId, 1);
+        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.of(item));
+
+        assertThat(service.read(cartItemId, ownerId)).isSameAs(item);
+    }
+
+    @Test
+    @DisplayName("read hides a line in somebody else's cart")
+    void read_foreignLineIsHidden() {
+        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.of(buildCartItem(intruderId, 1)));
+
+        assertThat(service.read(cartItemId, ownerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("read returns null for a missing line or a null id")
+    void read_missingReturnsNull() {
+        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.empty());
+
+        assertThat(service.read(cartItemId, ownerId)).isNull();
+        assertThat(service.read(null, ownerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("setting a positive quantity updates the caller's line")
+    void updateQuantity_savesUpdatedCopy() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(ownerId, 1)));
+        when(cartItemRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        CartItem updated = service.updateQuantity(cartItemId, ownerId, 7);
+
+        assertThat(updated.getQuantity()).isEqualTo(7);
+        assertThat(updated.getUser().getId()).isEqualTo(ownerId);
+    }
+
+    @Test
+    @DisplayName("setting the quantity to zero or less removes the line")
+    void updateQuantity_nonPositiveRemovesLine() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(ownerId, 4)));
+
+        assertThat(service.updateQuantity(cartItemId, ownerId, 0)).isNull();
+        verify(cartItemRepository).deleteById(cartItemId);
+        verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a quantity above the per-line cap is trimmed")
+    void updateQuantity_capsOversizedQuantity() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(ownerId, 1)));
+        when(cartItemRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        assertThat(service.updateQuantity(cartItemId, ownerId, 5_000).getQuantity()).isEqualTo(99);
+    }
+
+    @Test
+    @DisplayName("changing the quantity on somebody else's line changes nothing")
+    void updateQuantity_foreignLineIsRefused() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(intruderId, 1)));
+
+        assertThat(service.updateQuantity(cartItemId, ownerId, 99)).isNull();
+        verify(cartItemRepository, never()).save(any());
+        verify(cartItemRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("deleting the caller's own line works")
+    void delete_ownedLineIsRemoved() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(ownerId, 1)));
+
+        assertThat(service.delete(cartItemId, ownerId)).isTrue();
+        verify(cartItemRepository).deleteById(cartItemId);
+    }
+
+    @Test
+    @DisplayName("deleting somebody else's line is refused")
+    void delete_foreignLineIsRefused() {
+        when(cartItemRepository.findById(cartItemId))
+                .thenReturn(Optional.of(buildCartItem(intruderId, 1)));
+
+        assertThat(service.delete(cartItemId, ownerId)).isFalse();
+        verify(cartItemRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("getByUser returns only the caller's cart")
+    void getByUser_scopesToTheRequester() {
+        CartItem item = buildCartItem(ownerId, 1);
+        when(cartItemRepository.findByUser_Id(ownerId)).thenReturn(List.of(item));
+
+        assertThat(service.getByUser(ownerId)).containsExactly(item);
+        assertThat(service.getByUser(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("clearing only ever removes the caller's rows")
+    void clearCart_scopesToTheRequester() {
+        service.clearCart(ownerId);
+
+        verify(cartItemRepository).deleteByUser_Id(ownerId);
+    }
+
+    @Test
+    @DisplayName("clearing with no caller deletes nothing")
+    void clearCart_withNullRequesterDeletesNothing() {
+        service.clearCart(null);
+
+        verify(cartItemRepository, never()).deleteByUser_Id(any());
+    }
+
+    private User buildUser(UUID id) {
+        return new User.Builder().setId(id).setEmail(id + "@example.com").build();
+    }
+
+    private Product buildProduct(boolean active) {
+        return new Product.Builder()
+                .id(productId)
+                .name("Widget")
+                .price(new BigDecimal("10.00"))
+                .stockQuantity(50)
+                .active(active)
                 .build();
     }
 
-
-    @Test
-    void create_savesAndReturnsItem() {
-        when(cartItemRepository.save(existingItem)).thenReturn(existingItem);
-
-        assertSame(existingItem, cartItemService.create(existingItem));
-        verify(cartItemRepository).save(existingItem);
-    }
-
-    @Test
-    void read_existingId_returnsItem() {
-        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.of(existingItem));
-
-        assertSame(existingItem, cartItemService.read(cartItemId));
-    }
-
-    @Test
-    void read_missingId_returnsNull() {
-        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.empty());
-
-        assertNull(cartItemService.read(cartItemId));
-    }
-
-    @Test
-    void update_existingItem_savesAndReturnsIt() {
-        when(cartItemRepository.existsById(cartItemId)).thenReturn(true);
-        when(cartItemRepository.save(existingItem)).thenReturn(existingItem);
-
-        assertSame(existingItem, cartItemService.update(existingItem));
-    }
-
-    @Test
-    void update_missingItem_returnsNullAndDoesNotSave() {
-        when(cartItemRepository.existsById(cartItemId)).thenReturn(false);
-
-        assertNull(cartItemService.update(existingItem));
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-    }
-
-    @Test
-    void update_itemWithNullId_returnsNullAndDoesNotSave() {
-        CartItem unsaved = CartItem.builder().user(user).product(product).quantity(1).build();
-
-        assertNull(cartItemService.update(unsaved));
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-    }
-
-    @Test
-    void delete_existingId_deletesAndReturnsTrue() {
-        when(cartItemRepository.existsById(cartItemId)).thenReturn(true);
-
-        assertTrue(cartItemService.delete(cartItemId));
-        verify(cartItemRepository).deleteById(cartItemId);
-    }
-
-    @Test
-    void delete_missingId_returnsFalseAndDoesNotDelete() {
-        when(cartItemRepository.existsById(cartItemId)).thenReturn(false);
-
-        assertFalse(cartItemService.delete(cartItemId));
-        verify(cartItemRepository, never()).deleteById(any(UUID.class));
-    }
-
-    @Test
-    void getAll_returnsEveryItem() {
-        when(cartItemRepository.findAll()).thenReturn(List.of(existingItem));
-
-        assertEquals(1, cartItemService.getAll().size());
-    }
-
-    // getByUser
-
-    @Test
-    void getByUser_returnsUsersItems() {
-        when(cartItemRepository.findByUser_Id(userId)).thenReturn(List.of(existingItem));
-
-        List<CartItem> result = cartItemService.getByUser(userId);
-
-        assertEquals(1, result.size());
-        assertSame(existingItem, result.get(0));
-    }
-
-    // addToCart
-
-    @Test
-    void addToCart_newProduct_createsNewLine() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(productRepository.findById(productId)).thenReturn(Optional.of(product));
-        when(cartItemRepository.findByUser_IdAndProduct_Id(userId, productId)).thenReturn(Optional.empty());
-        when(cartItemRepository.save(any(CartItem.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        CartItem result = cartItemService.addToCart(userId, productId, 3);
-
-        ArgumentCaptor<CartItem> captor = ArgumentCaptor.forClass(CartItem.class);
-        verify(cartItemRepository).save(captor.capture());
-        CartItem saved = captor.getValue();
-
-        assertSame(user, saved.getUser());
-        assertSame(product, saved.getProduct());
-        assertEquals(3, saved.getQuantity());
-        assertNull(saved.getId());
-        assertNotNull(saved.getAddedAt());
-        assertSame(saved, result);
-    }
-
-    @Test
-    void addToCart_productAlreadyInCart_increasesQuantity() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(productRepository.findById(productId)).thenReturn(Optional.of(product));
-        when(cartItemRepository.findByUser_IdAndProduct_Id(userId, productId)).thenReturn(Optional.of(existingItem));
-        when(cartItemRepository.save(any(CartItem.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        CartItem result = cartItemService.addToCart(userId, productId, 3);
-
-        assertEquals(5, result.getQuantity());
-        assertEquals(cartItemId, result.getId());
-        assertEquals(addedAt, result.getAddedAt());
-        assertSame(user, result.getUser());
-        assertSame(product, result.getProduct());
-        assertEquals(2, existingItem.getQuantity());
-    }
-
-    @Test
-    void addToCart_quantityBelowOne_throwsBeforeAnyLookup() {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
-                cartItemService.addToCart(userId, productId, 0));
-
-        assertEquals("Quantity must be at least 1", ex.getMessage());
-        verifyNoInteractions(userRepository, productRepository, cartItemRepository);
-    }
-
-    @Test
-    void addToCart_unknownUser_throws() {
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
-                cartItemService.addToCart(userId, productId, 1));
-
-        assertEquals("User not found: " + userId, ex.getMessage());
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-    }
-
-    @Test
-    void addToCart_unknownProduct_throws() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(productRepository.findById(productId)).thenReturn(Optional.empty());
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
-                cartItemService.addToCart(userId, productId, 1));
-
-        assertEquals("Product not found: " + productId, ex.getMessage());
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-    }
-
-    // updateQuantity
-
-    @Test
-    void updateQuantity_validQuantity_savesUpdatedCopy() {
-        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.of(existingItem));
-        when(cartItemRepository.save(any(CartItem.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        CartItem result = cartItemService.updateQuantity(cartItemId, 7);
-
-        assertEquals(7, result.getQuantity());
-        assertEquals(cartItemId, result.getId());
-        assertEquals(addedAt, result.getAddedAt());
-        assertEquals(2, existingItem.getQuantity());   // original untouched
-    }
-
-    @Test
-    void updateQuantity_missingItem_returnsNull() {
-        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.empty());
-
-        assertNull(cartItemService.updateQuantity(cartItemId, 3));
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-        verify(cartItemRepository, never()).deleteById(any(UUID.class));
-    }
-
-    @Test
-    void updateQuantity_zeroOrLess_deletesLineAndReturnsNull() {
-        when(cartItemRepository.findById(cartItemId)).thenReturn(Optional.of(existingItem));
-
-        assertNull(cartItemService.updateQuantity(cartItemId, 0));
-
-        verify(cartItemRepository).deleteById(cartItemId);
-        verify(cartItemRepository, never()).save(any(CartItem.class));
-    }
-
-    // clearCart
-
-    @Test
-    void clearCart_deletesAllItemsForUser() {
-        cartItemService.clearCart(userId);
-
-        verify(cartItemRepository).deleteByUser_Id(userId);
+    private CartItem buildCartItem(UUID ownerId, int quantity) {
+        return new CartItem.Builder()
+                .id(cartItemId)
+                .user(buildUser(ownerId))
+                .product(buildProduct(true))
+                .quantity(quantity)
+                .build();
     }
 }

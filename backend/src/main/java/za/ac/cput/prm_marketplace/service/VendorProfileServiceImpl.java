@@ -1,31 +1,68 @@
 package za.ac.cput.prm_marketplace.service;
 
-import za.ac.cput.prm_marketplace.domain.VendorProfile;
-import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import za.ac.cput.prm_marketplace.domain.Role;
+import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.repository.UserRepository;
+import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class VendorProfileServiceImpl implements IVendorProfileService {
 
     private final VendorProfileRepository vendorProfileRepository;
+    private final UserRepository userRepository;
 
-    public VendorProfileServiceImpl(VendorProfileRepository vendorProfileRepository) {
+    public VendorProfileServiceImpl(VendorProfileRepository vendorProfileRepository,
+                                    UserRepository userRepository) {
         this.vendorProfileRepository = vendorProfileRepository;
+        this.userRepository = userRepository;
     }
 
     @Override
-    public VendorProfile create(VendorProfile vendorProfile) {
-        if (vendorProfile == null) {
+    @Transactional
+    public VendorProfile create(VendorProfile profile, UUID requesterId, Role requesterRole) {
+        if (profile == null || requesterId == null) {
             return null;
         }
-        return vendorProfileRepository.save(vendorProfile);
+
+        // Only a VENDOR account can hold a seller profile. Without this any student could open a
+        // storefront, which is not what the role exists to mean.
+        if (requesterRole != Role.VENDOR) {
+            return null;
+        }
+
+        // One profile per account: the column is unique, and failing here gives a clear rejection
+        // instead of a constraint violation surfacing as a 500.
+        if (vendorProfileRepository.existsByUserId(requesterId)) {
+            return null;
+        }
+
+        User owner = userRepository.findById(requesterId).orElse(null);
+        if (owner == null || profile.getBusinessName() == null || profile.getBusinessName().isBlank()) {
+            return null;
+        }
+
+        // Everything the caller sent except the business details is discarded. verified and
+        // ratingAvg in particular: a seller who could post verified:true would be marking
+        // themselves trusted, and there is nothing else in the flow that sets it.
+        VendorProfile created = new VendorProfile.Builder()
+                .setUser(owner)
+                .setBusinessName(profile.getBusinessName().trim())
+                .setRegistrationNo(profile.getRegistrationNo())
+                .setVerified(false)
+                .setRatingAvg(null)
+                .build();
+
+        return vendorProfileRepository.save(created);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public VendorProfile read(UUID id) {
         if (id == null) {
             return null;
@@ -34,30 +71,45 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
     }
 
     @Override
-    public VendorProfile update(VendorProfile vendorProfile) {
-        if (vendorProfile == null || vendorProfile.getId() == null
-                || !vendorProfileRepository.existsById(vendorProfile.getId())) {
+    @Transactional
+    public VendorProfile update(UUID id, VendorProfile profile, UUID requesterId) {
+        if (id == null || profile == null || requesterId == null) {
             return null;
         }
-        return vendorProfileRepository.save(vendorProfile);
-    }
 
-    @Override
-    public boolean delete(UUID id) {
-        if (id == null || !vendorProfileRepository.existsById(id)) {
-            return false;
+        VendorProfile existing = vendorProfileRepository.findByIdAndUserId(id, requesterId).orElse(null);
+        if (existing == null) {
+            return null;
         }
-        vendorProfileRepository.deleteById(id);
-        return true;
+
+        // Rebuilt from the stored row so only the two editable fields can move. The owner's id and
+        // the verified flag are re-applied from what is already in the database, which is what
+        // stops an edit being used to grant or keep verification.
+        VendorProfile updated = new VendorProfile.Builder()
+                .copy(existing)
+                .setBusinessName(profile.getBusinessName() != null && !profile.getBusinessName().isBlank()
+                        ? profile.getBusinessName().trim()
+                        : existing.getBusinessName())
+                .setRegistrationNo(profile.getRegistrationNo() != null
+                        ? profile.getRegistrationNo()
+                        : existing.getRegistrationNo())
+                .build();
+
+        return vendorProfileRepository.save(updated);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<VendorProfile> getAll() {
         return vendorProfileRepository.findAll();
     }
 
     @Override
-    public Optional<VendorProfile> findByUserId(UUID userId) {
-        return vendorProfileRepository.findByUserId(userId);
+    @Transactional(readOnly = true)
+    public VendorProfile findMine(UUID requesterId) {
+        if (requesterId == null) {
+            return null;
+        }
+        return vendorProfileRepository.findByUserId(requesterId).orElse(null);
     }
 }

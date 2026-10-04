@@ -1,6 +1,8 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
 import za.ac.cput.prm_marketplace.domain.PostLike;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -9,6 +11,7 @@ import za.ac.cput.prm_marketplace.repository.PostLikeRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -27,80 +30,57 @@ public class PostLikeServiceImpl implements IPostLikeService {
     }
 
     @Override
-    public PostLike create(PostLike postLike) {
-        if (postLike == null) {
+    @Transactional
+    public PostLike toggle(UUID postId, UUID requesterId) {
+        if (postId == null || requesterId == null) {
             return null;
         }
-        return postLikeRepository.save(postLike);
-    }
-
-    @Override
-    public PostLike read(UUID id) {
-        if (id == null) {
-            return null;
-        }
-        return postLikeRepository.findById(id).orElse(null);
-    }
-
-    @Override
-    public PostLike update(PostLike postLike) {
-        if (postLike == null || postLike.getId() == null || !postLikeRepository.existsById(postLike.getId())) {
-            return null;
-        }
-        return postLikeRepository.save(postLike);
-    }
-
-    @Override
-    public boolean delete(UUID id) {
-        if (id == null || !postLikeRepository.existsById(id)) {
-            return false;
-        }
-        postLikeRepository.deleteById(id);
-        return true;
-    }
-
-    @Override
-    public List<PostLike> getAll() {
-        return postLikeRepository.findAll();
-    }
-
-    @Override
-    public PostLike toggle(UUID postId, UUID userId) {
-        if (postId == null || userId == null) {
-            return null;
-        }
-
-        var existing = postLikeRepository.findByPostIdAndUserId(postId, userId);
-        if (existing.isPresent()) {
-            postLikeRepository.delete(existing.get());
-            syncLikeCount(postId, -1);
-            return null;
-        }
-
         BulletinPost post = bulletinPostRepository.findById(postId).orElse(null);
         if (post == null) {
             return null;
         }
-
-        User managedUser = userRepository.findById(userId).orElse(null);
-        if (managedUser == null) {
+        User user = userRepository.findById(requesterId).orElse(null);
+        if (user == null) {
             return null;
         }
 
-        PostLike saved = postLikeRepository.save(new PostLike.Builder()
-                .setPost(post)
-                .setUser(managedUser)
-                .build());
+        Optional<PostLike> existing = postLikeRepository.findByPostIdAndUserId(postId, requesterId);
+        if (existing.isPresent()) {
+            postLikeRepository.delete(existing.get());
+            postLikeRepository.flush();
+            syncLikeCount(postId, -1);
+            return null;
+        }
+
+        PostLike saved;
+        try {
+            saved = postLikeRepository.save(new PostLike.Builder()
+                    .setPost(post)
+                    .setUser(user)
+                    .build());
+            postLikeRepository.flush();
+        } catch (DataIntegrityViolationException raceLost) {
+            // Two clicks arrived together and the unique index on (post_id, user_id) let only one
+            // through. The second must behave like a like that was already there rather than
+            // raising a 500 or double-counting.
+            postLikeRepository.findByPostIdAndUserId(postId, requesterId)
+                    .ifPresent(duplicate -> {
+                        postLikeRepository.delete(duplicate);
+                        postLikeRepository.flush();
+                        syncLikeCount(postId, -1);
+                    });
+            return null;
+        }
         syncLikeCount(postId, 1);
         return saved;
     }
 
     @Override
-    public boolean hasLiked(UUID postId, UUID userId) {
-        if (postId == null || userId == null) {
+    public boolean hasLiked(UUID postId, UUID requesterId) {
+        if (postId == null || requesterId == null) {
             return false;
         }
-        return postLikeRepository.existsByPostIdAndUserId(postId, userId);
+        return postLikeRepository.existsByPostIdAndUserId(postId, requesterId);
     }
 
     @Override
@@ -112,11 +92,11 @@ public class PostLikeServiceImpl implements IPostLikeService {
     }
 
     @Override
-    public List<PostLike> getByUser(UUID userId) {
-        if (userId == null) {
+    public List<PostLike> getByUser(UUID requesterId) {
+        if (requesterId == null) {
             return List.of();
         }
-        return postLikeRepository.findByUserId(userId);
+        return postLikeRepository.findByUserId(requesterId);
     }
 
     private void syncLikeCount(UUID postId, int delta) {

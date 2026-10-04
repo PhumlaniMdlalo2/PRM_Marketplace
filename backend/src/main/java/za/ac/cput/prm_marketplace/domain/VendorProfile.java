@@ -1,23 +1,43 @@
 package za.ac.cput.prm_marketplace.domain;
 
-import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * A seller's business profile.
+ *
+ * <p>The business name and registration number are public: this is a public directory and buyers
+ * browse it. {@code verified} was the serious one, because it was bindable: any caller could post a
+ * profile for themselves with {@code "verified": true} and then edit it to stay that way, marking
+ * themselves a trusted seller with no check at all. It is read-only now, alongside the id, the
+ * rating and the creation time.
+ */
 @Entity
 @Table(name = "vendor_profiles")
 public class VendorProfile {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
+    /**
+     * The owning account.
+     *
+     * <p>{@code @JsonIgnore} in both directions, not WRITE_ONLY. A profile is always created for
+     * whoever the token belongs to, so there is never a legitimate reason to accept the owner from
+     * a request, and leaving it bindable only invites a body that names a different account. The
+     * old controller passed exactly that field straight into the service, which is how one seller
+     * could open or overwrite another's business.
+     */
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false, unique = true)
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @JsonIgnore
     private User user;
 
     @Column(nullable = false)
@@ -25,11 +45,16 @@ public class VendorProfile {
 
     private String registrationNo;
 
+    /** Set by faculty through moderation; never by the seller. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean verified;
 
+    /** Derived from the seller's reviews; never accepted from a client. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private BigDecimal ratingAvg;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected VendorProfile() {

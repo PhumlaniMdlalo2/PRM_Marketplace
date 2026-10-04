@@ -1,5 +1,7 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -14,6 +16,7 @@ public class Notification {
     private UUID id;
 
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID userId;
 
     @Enumerated(EnumType.STRING)
@@ -28,9 +31,11 @@ public class Notification {
 
     // "read" is a reserved word in MySQL, so the column is called is_read
     @Column(name = "is_read", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean read;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected Notification() {

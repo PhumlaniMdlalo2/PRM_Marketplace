@@ -1,24 +1,25 @@
 package za.ac.cput.prm_marketplace.service;
 
-import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.Notification;
 import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.repository.NotificationRepository;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceImplTest {
@@ -26,188 +27,202 @@ class NotificationServiceImplTest {
     @Mock
     private NotificationRepository notificationRepository;
 
-    @InjectMocks
-    private NotificationServiceImpl notificationService;
+    private NotificationServiceImpl service;
 
-    private UUID id;
-    private UUID userId;
+    private UUID ownerId;
+    private UUID intruderId;
+    private UUID notificationId;
 
     @BeforeEach
     void setUp() {
-        id = UUID.randomUUID();
-        userId = UUID.randomUUID();
+        service = new NotificationServiceImpl(notificationRepository);
+        ownerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        notificationId = UUID.randomUUID();
     }
 
-    private Notification buildNotification(boolean read) {
+    @Test
+    @DisplayName("send saves a notification addressed to the given user, unread")
+    void send_savesUnreadNotification() {
+        when(notificationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Notification sent = service.send(ownerId, NotificationType.SYSTEM, "Welcome", "Hello");
+
+        assertThat(sent).isNotNull();
+        assertThat(sent.getUserId()).isEqualTo(ownerId);
+        assertThat(sent.isRead()).isFalse();
+    }
+
+    @Test
+    @DisplayName("send requires a recipient and a type")
+    void send_rejectsIncompleteArguments() {
+        assertThat(service.send(null, NotificationType.SYSTEM, "t", "m")).isNull();
+        assertThat(service.send(ownerId, null, "t", "m")).isNull();
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("read returns the caller's own notification")
+    void read_ownedNotificationIsReturned() {
+        Notification notification = buildNotification(ownerId);
+        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
+
+        assertThat(service.read(notificationId, ownerId)).isSameAs(notification);
+    }
+
+    @Test
+    @DisplayName("read hides a notification addressed to somebody else")
+    void read_foreignNotificationIsHidden() {
+        when(notificationRepository.findById(notificationId))
+                .thenReturn(Optional.of(buildNotification(intruderId)));
+
+        assertThat(service.read(notificationId, ownerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("read returns null for a missing notification or a null id")
+    void read_missingReturnsNull() {
+        when(notificationRepository.findById(notificationId)).thenReturn(Optional.empty());
+
+        assertThat(service.read(notificationId, ownerId)).isNull();
+        assertThat(service.read(null, ownerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("delete removes the caller's own notification")
+    void delete_ownedNotificationIsRemoved() {
+        when(notificationRepository.findById(notificationId))
+                .thenReturn(Optional.of(buildNotification(ownerId)));
+
+        assertThat(service.delete(notificationId, ownerId)).isTrue();
+        verify(notificationRepository).deleteById(notificationId);
+    }
+
+    @Test
+    @DisplayName("delete refuses to remove somebody else's notification")
+    void delete_foreignNotificationIsRefused() {
+        when(notificationRepository.findById(notificationId))
+                .thenReturn(Optional.of(buildNotification(intruderId)));
+
+        assertThat(service.delete(notificationId, ownerId)).isFalse();
+        verify(notificationRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("the inbox is scoped to the caller")
+    void getByUserId_scopesToTheRequester() {
+        Notification notification = buildNotification(ownerId);
+        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(ownerId))
+                .thenReturn(List.of(notification));
+
+        assertThat(service.getByUserId(ownerId)).containsExactly(notification);
+        assertThat(service.getByUserId(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("unread notifications are scoped to the caller")
+    void getUnreadByUserId_scopesToTheRequester() {
+        Notification notification = buildNotification(ownerId);
+        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(ownerId))
+                .thenReturn(List.of(notification));
+
+        assertThat(service.getUnreadByUserId(ownerId)).containsExactly(notification);
+        assertThat(service.getUnreadByUserId(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("the unread count is scoped to the caller")
+    void countUnread_scopesToTheRequester() {
+        when(notificationRepository.countByUserIdAndReadFalse(ownerId)).thenReturn(6L);
+
+        assertThat(service.countUnread(ownerId)).isEqualTo(6L);
+        assertThat(service.countUnread(null)).isZero();
+    }
+
+    @Test
+    @DisplayName("marking the caller's own notification as read saves it")
+    void markAsRead_savesAsRead() {
+        when(notificationRepository.findById(notificationId))
+                .thenReturn(Optional.of(buildNotification(ownerId)));
+        when(notificationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Notification updated = service.markAsRead(notificationId, ownerId);
+
+        assertThat(updated).isNotNull();
+        assertThat(updated.isRead()).isTrue();
+    }
+
+    @Test
+    @DisplayName("marking somebody else's notification as read changes nothing")
+    void markAsRead_foreignNotificationIsRefused() {
+        when(notificationRepository.findById(notificationId))
+                .thenReturn(Optional.of(buildNotification(intruderId)));
+
+        assertThat(service.markAsRead(notificationId, ownerId)).isNull();
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an already-read notification is not written again")
+    void markAsRead_alreadyReadDoesNotSave() {
+        Notification notification = new Notification.Builder()
+                .copy(buildNotification(ownerId))
+                .setRead(true)
+                .build();
+        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
+
+        assertThat(service.markAsRead(notificationId, ownerId)).isSameAs(notification);
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("mark-as-read keeps the recipient from the stored row")
+    void markAsRead_doesNotReassignRecipient() {
+        Notification stored = buildNotification(ownerId);
+        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(stored));
+        when(notificationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Notification updated = service.markAsRead(notificationId, ownerId);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(ownerId);
+        assertThat(updated.getUserId()).isEqualTo(ownerId);
+    }
+
+    @Test
+    @DisplayName("mark-all-as-read only rewrites the caller's unread rows")
+    void markAllAsRead_scopesToTheRequester() {
+        Notification first = buildNotification(ownerId);
+        Notification second = buildNotification(ownerId);
+        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(ownerId))
+                .thenReturn(List.of(first, second));
+
+        assertThat(service.markAllAsRead(ownerId)).isEqualTo(2);
+
+        ArgumentCaptor<List<Notification>> captor = ArgumentCaptor.forClass(List.class);
+        verify(notificationRepository).saveAll(captor.capture());
+        assertThat(captor.getValue()).allMatch(Notification::isRead);
+    }
+
+    @Test
+    @DisplayName("mark-all-as-read with nothing unread reports zero and writes nothing")
+    void markAllAsRead_nothingUnreadReportsZero() {
+        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(ownerId))
+                .thenReturn(List.of());
+
+        assertThat(service.markAllAsRead(ownerId)).isZero();
+        assertThat(service.markAllAsRead(null)).isZero();
+        verify(notificationRepository, never()).saveAll(any());
+    }
+
+    private Notification buildNotification(UUID recipientId) {
         return new Notification.Builder()
-                .setId(id)
-                .setUserId(userId)
-                .setType(NotificationType.ORDER)
-                .setTitle("Order placed")
-                .setMessage("Your order has been placed.")
-                .setRead(read)
+                .setId(notificationId)
+                .setUserId(recipientId)
+                .setType(NotificationType.SYSTEM)
+                .setTitle("Welcome")
+                .setMessage("Hello")
                 .build();
-    }
-
-    // create / send
-
-    @Test
-    void create_validNotification_savesAsUnread() {
-        Notification request = new Notification.Builder()
-                .setUserId(userId).setType(NotificationType.SYSTEM)
-                .setTitle("Welcome").setMessage("Welcome to the marketplace")
-                .setRead(true) // client must not be able to create it as already read
-                .build();
-        when(notificationRepository.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        Notification created = notificationService.create(request);
-
-        assertNotNull(created);
-        assertFalse(created.isRead());
-        assertNotNull(created.getCreatedAt());
-    }
-
-    @Test
-    void create_invalidNotification_returnsNull() {
-        assertNull(notificationService.create(null));
-        assertNull(notificationService.create(new Notification.Builder().setUserId(userId).build()));
-        verify(notificationRepository, never()).save(any(Notification.class));
-    }
-
-    @Test
-    void send_validArguments_savesNotification() {
-        when(notificationRepository.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        Notification sent = notificationService.send(userId, NotificationType.PAYMENT, "Title", "Message");
-
-        assertNotNull(sent);
-        assertEquals(userId, sent.getUserId());
-        assertEquals(NotificationType.PAYMENT, sent.getType());
-    }
-
-    // read / update / delete
-
-    @Test
-    void read_existingNotification_returnsIt() {
-        Notification notification = buildNotification(false);
-        when(notificationRepository.findById(id)).thenReturn(Optional.of(notification));
-
-        assertEquals(notification, notificationService.read(id));
-    }
-
-    @Test
-    void read_missingNotification_returnsNull() {
-        when(notificationRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertNull(notificationService.read(id));
-        assertNull(notificationService.read(null));
-    }
-
-    @Test
-    void update_existingNotification_saves() {
-        Notification notification = buildNotification(false);
-        when(notificationRepository.existsById(id)).thenReturn(true);
-        when(notificationRepository.save(notification)).thenReturn(notification);
-
-        assertEquals(notification, notificationService.update(notification));
-    }
-
-    @Test
-    void update_missingNotification_returnsNull() {
-        when(notificationRepository.existsById(id)).thenReturn(false);
-
-        assertNull(notificationService.update(buildNotification(false)));
-        verify(notificationRepository, never()).save(any(Notification.class));
-    }
-
-    @Test
-    void delete_existingNotification_returnsTrue() {
-        when(notificationRepository.existsById(id)).thenReturn(true);
-
-        assertTrue(notificationService.delete(id));
-        verify(notificationRepository).deleteById(id);
-    }
-
-    @Test
-    void delete_missingNotification_returnsFalse() {
-        when(notificationRepository.existsById(id)).thenReturn(false);
-
-        assertFalse(notificationService.delete(id));
-    }
-
-    // per-user queries
-
-    @Test
-    void getByUserId_returnsNotificationsForUser() {
-        List<Notification> list = Arrays.asList(buildNotification(false), buildNotification(true));
-        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(list);
-
-        assertEquals(2, notificationService.getByUserId(userId).size());
-        assertTrue(notificationService.getByUserId(null).isEmpty());
-    }
-
-    @Test
-    void getUnreadByUserId_returnsOnlyUnread() {
-        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId))
-                .thenReturn(Arrays.asList(buildNotification(false)));
-
-        assertEquals(1, notificationService.getUnreadByUserId(userId).size());
-    }
-
-    @Test
-    void countUnread_returnsRepositoryCount() {
-        when(notificationRepository.countByUserIdAndReadFalse(userId)).thenReturn(3L);
-
-        assertEquals(3L, notificationService.countUnread(userId));
-        assertEquals(0L, notificationService.countUnread(null));
-    }
-
-    // mark as read
-
-    @Test
-    void markAsRead_unreadNotification_savesAsRead() {
-        when(notificationRepository.findById(id)).thenReturn(Optional.of(buildNotification(false)));
-        when(notificationRepository.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        Notification result = notificationService.markAsRead(id);
-
-        assertTrue(result.isRead());
-    }
-
-    @Test
-    void markAsRead_alreadyRead_doesNotSaveAgain() {
-        when(notificationRepository.findById(id)).thenReturn(Optional.of(buildNotification(true)));
-
-        Notification result = notificationService.markAsRead(id);
-
-        assertTrue(result.isRead());
-        verify(notificationRepository, never()).save(any(Notification.class));
-    }
-
-    @Test
-    void markAsRead_missingNotification_returnsNull() {
-        when(notificationRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertNull(notificationService.markAsRead(id));
-    }
-
-    @Test
-    void markAllAsRead_updatesEveryUnreadNotification() {
-        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId))
-                .thenReturn(Arrays.asList(buildNotification(false), buildNotification(false)));
-
-        int count = notificationService.markAllAsRead(userId);
-
-        assertEquals(2, count);
-        verify(notificationRepository).saveAll(any(Iterable.class));
-    }
-
-    @Test
-    void markAllAsRead_nothingUnread_returnsZero() {
-        when(notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId))
-                .thenReturn(Arrays.<Notification>asList());
-
-        assertEquals(0, notificationService.markAllAsRead(userId));
-        verify(notificationRepository, never()).saveAll(any(Iterable.class));
     }
 }

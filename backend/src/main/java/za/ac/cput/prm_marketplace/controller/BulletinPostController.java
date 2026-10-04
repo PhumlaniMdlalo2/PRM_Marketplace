@@ -1,71 +1,81 @@
 package za.ac.cput.prm_marketplace.controller;
 
-import za.ac.cput.prm_marketplace.domain.BulletinPost;
-import za.ac.cput.prm_marketplace.service.IBulletinPostService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import za.ac.cput.prm_marketplace.domain.BulletinPost;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
+import za.ac.cput.prm_marketplace.service.IBulletinPostService;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/bulletin-posts")
+@RequestMapping("/api/bulletin-posts")
 public class BulletinPostController {
 
     private final IBulletinPostService bulletinPostService;
 
+    @Autowired
     public BulletinPostController(IBulletinPostService bulletinPostService) {
         this.bulletinPostService = bulletinPostService;
     }
 
+    /**
+     * The author is the caller. The old endpoint took the author from the request body, so anyone
+     * could publish under another person's name.
+     */
     @PostMapping
-    public ResponseEntity<BulletinPost> create(@RequestBody BulletinPost bulletinPost) {
-        BulletinPost created = bulletinPostService.create(bulletinPost);
+    public ResponseEntity<BulletinPost> create(@RequestBody BulletinPost bulletinPost,
+                                               Authentication authentication) {
+        BulletinPost created = bulletinPostService.create(bulletinPost, CurrentCaller.id(authentication));
         if (created == null) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+        return new ResponseEntity<>(created, HttpStatus.CREATED);
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<BulletinPost> read(@PathVariable UUID id) {
-        BulletinPost bulletinPost = bulletinPostService.read(id);
-        if (bulletinPost == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(bulletinPost);
-    }
-
-    @PutMapping
-    public ResponseEntity<BulletinPost> update(@RequestBody BulletinPost bulletinPost) {
-        BulletinPost updated = bulletinPostService.update(bulletinPost);
-        if (updated == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(updated);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        boolean deleted = bulletinPostService.delete(id);
-        if (!deleted) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.noContent().build();
-    }
-
+    /** Reading the board is public. */
     @GetMapping
     public ResponseEntity<List<BulletinPost>> getAll() {
         return ResponseEntity.ok(bulletinPostService.getAll());
     }
 
     @GetMapping("/author/{authorId}")
-    public ResponseEntity<BulletinPost> findByAuthorId(@PathVariable UUID authorId) {
-        Optional<BulletinPost> bulletinPost = bulletinPostService.findByAuthorId(authorId);
-        return bulletinPost
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    public ResponseEntity<List<BulletinPost>> getByAuthor(@PathVariable UUID authorId) {
+        return ResponseEntity.ok(bulletinPostService.getByAuthor(authorId));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<BulletinPost> read(@PathVariable UUID id) {
+        BulletinPost post = bulletinPostService.read(id);
+        if (post == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(post);
+    }
+
+    /** @return 404 unless the caller wrote the post */
+    @PutMapping("/{id}")
+    public ResponseEntity<BulletinPost> update(@PathVariable UUID id,
+                                               @RequestBody BulletinPost bulletinPost,
+                                               Authentication authentication) {
+        BulletinPost toUpdate = new BulletinPost.Builder().copy(bulletinPost).setId(id).build();
+        BulletinPost updated = bulletinPostService.update(toUpdate, CurrentCaller.id(authentication));
+        if (updated == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(updated);
+    }
+
+    /** @return 404 unless the caller wrote the post */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
+        if (!bulletinPostService.delete(id, CurrentCaller.id(authentication))) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
     }
 }

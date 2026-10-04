@@ -1,9 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -16,6 +17,7 @@ public class SavedItem {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User user;
 
     @ManyToOne(optional = false)
@@ -23,6 +25,7 @@ public class SavedItem {
     private Product product;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime savedAt;
 
     protected SavedItem() {
@@ -61,12 +64,12 @@ public class SavedItem {
         if (this == o) return true;
         if (!(o instanceof SavedItem)) return false;
         SavedItem savedItem = (SavedItem) o;
-        return Objects.equals(id, savedItem.id);
+        return id != null && id.equals(savedItem.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

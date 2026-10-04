@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import za.ac.cput.prm_marketplace.domain.Review;
 import za.ac.cput.prm_marketplace.repository.ReviewRepository;
 
@@ -17,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -27,141 +29,235 @@ class ReviewServiceImplTest {
 
     private ReviewServiceImpl service;
 
-    private UUID id;
-    private Review review;
+    private UUID reviewerId;
+    private UUID intruderId;
+    private UUID productId;
+    private UUID reviewId;
 
     @BeforeEach
     void setUp() {
         service = new ReviewServiceImpl(reviewRepository);
-        id = UUID.randomUUID();
-        review = new Review.Builder()
-                .setId(id)
-                .setProductId(UUID.randomUUID())
-                .setReviewerId(UUID.randomUUID())
-                .setRating(4)
-                .setComment("Exactly as described.")
+        reviewerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+        productId = UUID.randomUUID();
+        reviewId = UUID.randomUUID();
+    }
+
+    @Test
+    @DisplayName("create attributes the review to the caller, not the reviewerId in the body")
+    void create_takesReviewerFromTheRequester() {
+        when(reviewRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Review hostile = new Review.Builder()
+                .setId(UUID.randomUUID())
+                .setProductId(productId)
+                .setReviewerId(intruderId)
+                .setRating(5)
+                .setComment("Excellent")
                 .build();
+
+        Review created = service.create(hostile, reviewerId);
+
+        assertThat(created).isNotNull();
+        assertThat(created.getReviewerId()).isEqualTo(reviewerId);
+        assertThat(created.getProductId()).isEqualTo(productId);
+        // A client-supplied id must not turn the insert into an overwrite.
+        assertThat(created.getId()).isNull();
     }
 
     @Test
-    @DisplayName("create returns null for a null review")
-    void create_nullReturnsNull() {
-        assertThat(service.create(null)).isNull();
+    @DisplayName("create rejects a rating outside one to five")
+    void create_rejectsAnOutOfRangeRating() {
+        assertThat(service.create(buildReview(0), reviewerId)).isNull();
+        assertThat(service.create(buildReview(6), reviewerId)).isNull();
+        assertThat(service.create(buildReview(-1), reviewerId)).isNull();
 
-        verify(reviewRepository, never()).save(any());
+        verifyNoInteractions(reviewRepository);
     }
 
     @Test
-    @DisplayName("create delegates to the repository")
-    void create_savesReview() {
-        when(reviewRepository.save(review)).thenReturn(review);
+    @DisplayName("create returns null for a null payload or reviewer")
+    void create_rejectsNulls() {
+        assertThat(service.create(null, reviewerId)).isNull();
+        assertThat(service.create(buildReview(4), null)).isNull();
 
-        assertThat(service.create(review)).isSameAs(review);
-
-        verify(reviewRepository).save(review);
+        verifyNoInteractions(reviewRepository);
     }
 
     @Test
-    @DisplayName("read returns null for a null id")
-    void read_nullIdReturnsNull() {
+    @DisplayName("create reports a second review of the same product as null rather than a 500")
+    void create_duplicateReviewIsRejected() {
+        // uk_review_product_reviewer is the reason this returns null instead of blowing up.
+        when(reviewRepository.save(any()))
+                .thenThrow(new DataIntegrityViolationException("uk_review_product_reviewer"));
+
+        assertThat(service.create(buildReview(4), reviewerId)).isNull();
+    }
+
+    @Test
+    @DisplayName("read returns the stored review or null when it is missing")
+    void read_returnsStoredReview() {
+        Review stored = buildReview(4, reviewId);
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(stored));
+
+        assertThat(service.read(reviewId)).isSameAs(stored);
         assertThat(service.read(null)).isNull();
-
-        verify(reviewRepository, never()).findById(any());
     }
 
     @Test
-    @DisplayName("read returns the stored review")
-    void read_returnsReview() {
-        when(reviewRepository.findById(id)).thenReturn(Optional.of(review));
-
-        assertThat(service.read(id)).isSameAs(review);
-    }
-
-    @Test
-    @DisplayName("read returns null when the review is absent")
-    void read_missingReturnsNull() {
-        when(reviewRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertThat(service.read(id)).isNull();
-    }
-
-    @Test
-    @DisplayName("update returns null for a null review")
-    void update_nullReturnsNull() {
-        assertThat(service.update(null)).isNull();
-
-        verify(reviewRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("update returns null when the review has no id")
-    void update_nullIdReturnsNull() {
-        Review noId = new Review.Builder()
-                .setProductId(UUID.randomUUID())
-                .setReviewerId(UUID.randomUUID())
+    @DisplayName("update saves the caller's review but keeps the stored product and reviewer")
+    void update_preservesStoredAttribution() {
+        Review stored = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(productId)
+                .setReviewerId(reviewerId)
                 .setRating(3)
+                .setComment("Average")
+                .build();
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(stored));
+        when(reviewRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        Review body = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(UUID.randomUUID())
+                .setReviewerId(intruderId)
+                .setRating(5)
+                .setComment("Actually excellent")
                 .build();
 
-        assertThat(service.update(noId)).isNull();
+        Review updated = service.update(body, reviewerId);
 
-        verify(reviewRepository, never()).existsById(any());
+        assertThat(updated).isNotNull();
+        assertThat(updated.getRating()).isEqualTo(5);
+        assertThat(updated.getComment()).isEqualTo("Actually excellent");
+        assertThat(updated.getReviewerId()).isEqualTo(reviewerId);
+        assertThat(updated.getProductId()).isEqualTo(productId);
+    }
+
+    @Test
+    @DisplayName("update refuses to touch another account's review")
+    void update_foreignReviewIsRefused() {
+        Review stored = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(productId)
+                .setReviewerId(intruderId)
+                .setRating(3)
+                .setComment("Average")
+                .build();
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(stored));
+
+        assertThat(service.update(stored, reviewerId)).isNull();
         verify(reviewRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("update returns null when the review does not exist")
-    void update_missingReturnsNull() {
-        when(reviewRepository.existsById(id)).thenReturn(false);
+    @DisplayName("update rejects an out-of-range rating without saving")
+    void update_rejectsAnOutOfRangeRating() {
+        Review body = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(productId)
+                .setReviewerId(reviewerId)
+                .setRating(99)
+                .setComment("Perfect")
+                .build();
 
-        assertThat(service.update(review)).isNull();
+        // The rating is validated before the stored row is even loaded.
+        assertThat(service.update(body, reviewerId)).isNull();
+        verifyNoInteractions(reviewRepository);
+    }
+
+    @Test
+    @DisplayName("update returns null for a missing review or a body without an id")
+    void update_invalidInputReturnsNull() {
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.empty());
+
+        assertThat(service.update(buildReview(4, reviewId), reviewerId)).isNull();
+        assertThat(service.update(buildReview(4), reviewerId)).isNull();
+        assertThat(service.update(null, reviewerId)).isNull();
 
         verify(reviewRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("update saves an existing review")
-    void update_savesReview() {
-        when(reviewRepository.existsById(id)).thenReturn(true);
-        when(reviewRepository.save(review)).thenReturn(review);
+    @DisplayName("delete removes the caller's own review")
+    void delete_ownedReviewIsRemoved() {
+        Review stored = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(productId)
+                .setReviewerId(reviewerId)
+                .setRating(3)
+                .setComment("Average")
+                .build();
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(stored));
 
-        assertThat(service.update(review)).isSameAs(review);
-
-        verify(reviewRepository).save(review);
+        assertThat(service.delete(reviewId, reviewerId)).isTrue();
+        verify(reviewRepository).deleteById(reviewId);
     }
 
     @Test
-    @DisplayName("delete returns false for a null id")
-    void delete_nullIdReturnsFalse() {
-        assertThat(service.delete(null)).isFalse();
+    @DisplayName("delete refuses to remove another account's review")
+    void delete_foreignReviewIsRefused() {
+        Review stored = new Review.Builder()
+                .setId(reviewId)
+                .setProductId(productId)
+                .setReviewerId(intruderId)
+                .setRating(3)
+                .setComment("Average")
+                .build();
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(stored));
 
+        assertThat(service.delete(reviewId, reviewerId)).isFalse();
         verify(reviewRepository, never()).deleteById(any());
     }
 
     @Test
-    @DisplayName("delete returns false when the review does not exist")
+    @DisplayName("delete returns false for a missing review")
     void delete_missingReturnsFalse() {
-        when(reviewRepository.existsById(id)).thenReturn(false);
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.empty());
 
-        assertThat(service.delete(id)).isFalse();
-
+        assertThat(service.delete(reviewId, reviewerId)).isFalse();
         verify(reviewRepository, never()).deleteById(any());
-    }
-
-    @Test
-    @DisplayName("delete removes an existing review")
-    void delete_removesReview() {
-        when(reviewRepository.existsById(id)).thenReturn(true);
-
-        assertThat(service.delete(id)).isTrue();
-
-        verify(reviewRepository).deleteById(id);
     }
 
     @Test
     @DisplayName("getAll returns every review")
-    void getAll_returnsList() {
-        when(reviewRepository.findAll()).thenReturn(List.of(review));
+    void getAll_returnsEveryReview() {
+        Review stored = buildReview(4, reviewId);
+        when(reviewRepository.findAll()).thenReturn(List.of(stored));
 
-        assertThat(service.getAll()).containsExactly(review);
+        assertThat(service.getAll()).containsExactly(stored);
+    }
+
+    @Test
+    @DisplayName("product and author listings scope to their argument and reject null")
+    void listings_areScoped() {
+        Review stored = buildReview(4, reviewId);
+        when(reviewRepository.findByProductId(productId)).thenReturn(List.of(stored));
+        when(reviewRepository.findByReviewerId(reviewerId)).thenReturn(List.of(stored));
+
+        assertThat(service.getByProduct(productId)).containsExactly(stored);
+        assertThat(service.getByReviewer(reviewerId)).containsExactly(stored);
+        assertThat(service.getByProduct(null)).isEmpty();
+        assertThat(service.getByReviewer(null)).isEmpty();
+    }
+
+    private Review buildReview(int rating) {
+        return new Review.Builder()
+                .setProductId(productId)
+                .setReviewerId(intruderId)
+                .setRating(rating)
+                .setComment("Good value")
+                .build();
+    }
+
+    /** The entity deliberately exposes no id setter, so the id is seeded via the builder. */
+    private Review buildReview(int rating, UUID id) {
+        return new Review.Builder()
+                .setId(id)
+                .setProductId(productId)
+                .setReviewerId(intruderId)
+                .setRating(rating)
+                .setComment("Good value")
+                .build();
     }
 }

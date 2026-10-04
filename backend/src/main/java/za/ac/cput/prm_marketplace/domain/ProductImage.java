@@ -1,12 +1,19 @@
 package za.ac.cput.prm_marketplace.domain;
 
-import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * One of a product's photographs.
+ *
+ * <p>The product is named by the request path, not by the body, so {@code product} is hidden from
+ * output and ignored on input: the service loads the seller's own product instead. It stays
+ * WRITE_ONLY rather than READ_ONLY because writing it out would walk Product to its images and back
+ * to this object, and that lazy collection cannot be walked here.
+ */
 @Entity
 @Table(name = "product_images")
 public class ProductImage {
@@ -26,10 +33,12 @@ public class ProductImage {
     @Column(name = "sort_order")
     private int sortOrder;
 
+    /** At most one image per product is primary; the service clears the previous one. */
     @Column(name = "is_primary")
     private boolean primary;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
     protected ProductImage() {
@@ -72,6 +81,17 @@ public class ProductImage {
         this.product = product;
     }
 
+    /**
+     * Moves the primary flag on an image already in the database.
+     *
+     * <p>The service uses this to demote the previous primary when a new one arrives. A product
+     * must only ever have one cover image, and there is no unique constraint on the column that
+     * could enforce it for us.
+     */
+    public void setPrimary(boolean primary) {
+        this.primary = primary;
+    }
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
@@ -82,12 +102,12 @@ public class ProductImage {
         if (this == o) return true;
         if (!(o instanceof ProductImage)) return false;
         ProductImage productImage = (ProductImage) o;
-        return Objects.equals(id, productImage.id);
+        return id != null && id.equals(productImage.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

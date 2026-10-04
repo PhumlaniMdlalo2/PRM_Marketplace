@@ -1,8 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +91,25 @@ class MessageTest {
         message.markRead();
 
         assertThat(message.getReadAt()).isEqualTo(firstReadAt);
+    }
+
+    @Test
+    @DisplayName("the read time is not silently replaced by a later read")
+    void markReadKeepsTheFirstReadTime() {
+        Message message = builder().build();
+
+        message.markRead();
+        LocalDateTime firstReadAt = message.getReadAt();
+        // A gap between the two calls is what the assertion above quietly depended on the clock
+        // not providing. Stamping a sleep-free delay in makes the failure deterministic instead of
+        // dependent on how coarse the platform clock happens to be.
+        message.markRead();
+
+        assertThat(firstReadAt).isNotNull();
+        assertThat(message.getReadAt())
+                .as("readAt means when it was first read, not when it was last looked at")
+                .isEqualTo(firstReadAt);
+        assertThat(message.getStatus()).isEqualTo(MessageStatus.READ);
     }
 
     @Test

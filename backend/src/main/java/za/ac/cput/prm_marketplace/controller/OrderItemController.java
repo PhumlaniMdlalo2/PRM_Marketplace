@@ -1,14 +1,23 @@
 package za.ac.cput.prm_marketplace.controller;
 
-import za.ac.cput.prm_marketplace.domain.OrderItem;
-import za.ac.cput.prm_marketplace.service.IOrderItemService;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import za.ac.cput.prm_marketplace.domain.OrderItem;
+import za.ac.cput.prm_marketplace.security.CurrentCaller;
+import za.ac.cput.prm_marketplace.service.IOrderItemService;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * A read-only view of the lines on the caller's orders.
+ *
+ * <p>The POST, PUT and DELETE routes here are gone, along with the bare {@code GET} that returned
+ * every line item in the system. Line items are created by checkout and the order total is
+ * calculated from them, so accepting them over the API let a caller set their own price on a line,
+ * move a line onto somebody else's order, or remove a line from a live order.
+ */
 @RestController
 @RequestMapping("/api/order-items")
 public class OrderItemController {
@@ -19,52 +28,23 @@ public class OrderItemController {
         this.orderItemService = orderItemService;
     }
 
-    @PostMapping
-    public ResponseEntity<OrderItem> create(@RequestBody OrderItem orderItem) {
-        OrderItem created = orderItemService.create(orderItem);
-
-        if (created == null) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
-
+    /** A line item on one of the caller's own orders. Somebody else's reads as not found. */
     @GetMapping("/{id}")
-    public ResponseEntity<OrderItem> read(@PathVariable UUID id) {
-        OrderItem orderItem = orderItemService.read(id);
-
+    public ResponseEntity<OrderItem> read(@PathVariable UUID id, Authentication authentication) {
+        OrderItem orderItem = orderItemService.read(id, CurrentCaller.id(authentication));
         if (orderItem == null) {
             return ResponseEntity.notFound().build();
         }
-
         return ResponseEntity.ok(orderItem);
     }
 
-    @PutMapping
-    public ResponseEntity<OrderItem> update(@RequestBody OrderItem orderItem) {
-        OrderItem updated = orderItemService.update(orderItem);
-
-        if (updated == null) {
-            return ResponseEntity.notFound().build();
-        }
-
-        return ResponseEntity.ok(updated);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        boolean deleted = orderItemService.delete(id);
-
-        if (!deleted) {
-            return ResponseEntity.notFound().build();
-        }
-
-        return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping
-    public ResponseEntity<List<OrderItem>> getAll() {
-        return ResponseEntity.ok(orderItemService.getAll());
+    /**
+     * The lines on one of the caller's own orders. Returns an empty list for an order that is not
+     * theirs, rather than revealing that the order exists.
+     */
+    @GetMapping("/order/{orderId}")
+    public ResponseEntity<List<OrderItem>> getByOrderId(@PathVariable UUID orderId,
+                                                         Authentication authentication) {
+        return ResponseEntity.ok(orderItemService.getByOrderId(orderId, CurrentCaller.id(authentication)));
     }
 }

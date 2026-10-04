@@ -1,55 +1,71 @@
 package za.ac.cput.prm_marketplace.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.Conversation;
+import za.ac.cput.prm_marketplace.domain.MessageStatus;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.repository.ConversationRepository;
-import za.ac.cput.prm_marketplace.repository.MessageRepository;
+import za.ac.cput.prm_marketplace.repository.ProductRepository;
+import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class ConversationServiceImpl implements IConversationService {
 
     private final ConversationRepository conversationRepository;
-    private final MessageRepository messageRepository;
+    private final UserRepository userRepository;
+    private final ProductRepository productRepository;
 
     public ConversationServiceImpl(ConversationRepository conversationRepository,
-                                   MessageRepository messageRepository) {
+                                   UserRepository userRepository,
+                                   ProductRepository productRepository) {
         this.conversationRepository = conversationRepository;
-        this.messageRepository = messageRepository;
+        this.userRepository = userRepository;
+        this.productRepository = productRepository;
     }
 
     @Override
-    public Conversation create(Conversation conversation) {
-        if (conversation == null) {
+    @Transactional
+    public Conversation getOrCreate(UUID requesterId, UUID otherPartyId, UUID productId) {
+        if (requesterId == null || otherPartyId == null || requesterId.equals(otherPartyId)) {
             return null;
         }
-        return conversationRepository.save(conversation);
-    }
-
-    @Override
-    public Conversation read(UUID id) {
-        if (id == null) {
+        User requester = userRepository.findById(requesterId).orElse(null);
+        User otherParty = userRepository.findById(otherPartyId).orElse(null);
+        if (requester == null || otherParty == null) {
             return null;
         }
-        return conversationRepository.findById(id).orElse(null);
-    }
+        // Re-read the product so a client cannot attach an unsaved or fabricated row.
+        Product product = productId == null ? null : productRepository.findById(productId).orElse(null);
 
-    @Override
-    public Conversation update(Conversation conversation) {
-        if (conversation == null || conversation.getId() == null
-                || !conversationRepository.existsById(conversation.getId())) {
-            return null;
+        Optional<Conversation> existing = findExisting(requesterId, otherPartyId, productId);
+        if (existing.isPresent()) {
+            return existing.get();
         }
-        return conversationRepository.save(conversation);
+        // The requester is always the buyer, so the caller cannot nominate the other side's role
+        // or insert themselves as the seller.
+        return conversationRepository.save(new Conversation.Builder()
+                .setBuyer(requester)
+                .setSeller(otherParty)
+                .setProduct(product)
+                .build());
     }
 
     @Override
-    public boolean delete(UUID id) {
-        if (id == null || !conversationRepository.existsById(id)) {
+    public Conversation read(UUID id, UUID requesterId) {
+        Conversation conversation = find(id);
+        return isParticipant(conversation, requesterId) ? conversation : null;
+    }
+
+    @Override
+    @Transactional
+    public boolean delete(UUID id, UUID requesterId) {
+        if (read(id, requesterId) == null) {
             return false;
         }
         conversationRepository.deleteById(id);
@@ -57,63 +73,52 @@ public class ConversationServiceImpl implements IConversationService {
     }
 
     @Override
-    public List<Conversation> getAll() {
-        return conversationRepository.findAll();
-    }
-
-    @Override
-    public List<Conversation> getForUser(UUID userId) {
-        if (userId == null) {
+    public List<Conversation> getForUser(UUID requesterId) {
+        if (requesterId == null) {
             return List.of();
         }
-        return conversationRepository.findByBuyerIdOrSellerIdOrderByLastMessageAtDesc(userId, userId);
+        return conversationRepository.findByBuyerIdOrSellerIdOrderByLastMessageAtDesc(
+                requesterId, requesterId);
     }
 
     @Override
-    public Conversation getOrCreate(User buyer, User seller, Product product) {
-        if (buyer == null || seller == null) {
-            return null;
+    public long unreadCount(UUID requesterId) {
+        if (requesterId == null) {
+            return 0L;
         }
-        if (buyer.getId() != null && buyer.getId().equals(seller.getId())) {
-            return null;
-        }
-
-        UUID productId = product == null ? null : product.getId();
-        return findExisting(buyer.getId(), seller.getId(), productId)
-                .orElseGet(() -> conversationRepository.save(new Conversation.Builder()
-                        .setBuyer(buyer)
-                        .setSeller(seller)
-                        .setProduct(product)
-                        .build()));
+        return conversationRepository.countUnreadConversations(requesterId, MessageStatus.READ);
     }
 
-    private java.util.Optional<Conversation> findExisting(UUID buyerId, UUID sellerId, UUID productId) {
+    @Override
+    public List<UUID> participantIds(UUID conversationId) {
+        Conversation conversation = find(conversationId);
+        if (conversation == null) {
+            return List.of();
+        }
+        return List.of(conversation.getBuyer().getId(), conversation.getSeller().getId());
+    }
+
+    private Optional<Conversation> findExisting(UUID buyerId, UUID sellerId, UUID productId) {
         if (productId == null) {
             return conversationRepository.findByBuyerIdAndSellerIdAndProductIsNull(buyerId, sellerId);
         }
         return conversationRepository.findByBuyerIdAndSellerIdAndProductId(buyerId, sellerId, productId);
     }
 
-    @Override
-    public Conversation readForParticipant(UUID id, UUID userId) {
-        Conversation conversation = read(id);
-        if (conversation == null) {
+    private Conversation find(UUID id) {
+        if (id == null) {
             return null;
         }
-        boolean isBuyer = conversation.getBuyer() != null
-                && conversation.getBuyer().getId() != null
-                && conversation.getBuyer().getId().equals(userId);
-        boolean isSeller = conversation.getSeller() != null
-                && conversation.getSeller().getId() != null
-                && conversation.getSeller().getId().equals(userId);
-        return (isBuyer || isSeller) ? conversation : null;
+        return conversationRepository.findById(id).orElse(null);
     }
 
-    @Override
-    public long unreadCount(UUID userId) {
-        if (userId == null) {
-            return 0L;
-        }
-        return conversationRepository.countByBuyerIdOrSellerId(userId, userId);
+    private boolean isParticipant(Conversation conversation, UUID userId) {
+        return conversation != null
+                && userId != null
+                && (matches(conversation.getBuyer(), userId) || matches(conversation.getSeller(), userId));
+    }
+
+    private boolean matches(User party, UUID userId) {
+        return party != null && party.getId() != null && party.getId().equals(userId);
     }
 }

@@ -2,35 +2,63 @@ package za.ac.cput.prm_marketplace.service;
 
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.Role;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Payments are scoped to the account that owns them. Every method that can reach a stored payment
+ * takes the caller, because a payment id is guessable in the sense that it does not belong to the
+ * person holding it: reading by id alone would expose another account's payment history.
+ *
+ * <p>Two operations that used to exist were removed rather than restricted:
+ * <ul>
+ *   <li>listing every payment in the system, which returned all customers' payments to anyone;</li>
+ *   <li>deleting a payment, which is a financial record and belongs in the status lifecycle.</li>
+ * </ul>
+ */
 public interface IPaymentService {
 
-    Payment create(Payment payment);
+    /**
+     * Records a payment attempt against one of the caller's own orders.
+     *
+     * <p>The payer is the caller, the amount defaults to the order total and may not exceed it,
+     * and the status, reference and timestamps are set by the server. Returns null when the order
+     * is missing, is not the caller's, or the amount is unusable.
+     */
+    Payment create(Payment payment, UUID requesterId);
 
-    Payment read(UUID id);
+    /** The caller's own payment, or null if it does not exist or is somebody else's. */
+    Payment read(UUID id, UUID requesterId);
 
     /**
-     * Only a PENDING payment can be edited (method / amount).
-     * Use {@link #updateStatus(UUID, PaymentStatus)} to move a payment through its lifecycle.
+     * Updates the payment method on a PENDING payment of the caller's own.
+     *
+     * <p>The payment to change is named by {@code id} from the path rather than from the body,
+     * which is ignored. The amount is deliberately not editable here: the order total is
+     * authoritative, and a client that could lower the amount of a payment it has not made yet
+     * could pay a fraction of the order. Returns null when the payment is missing, not owned by
+     * the caller, or no longer PENDING.
      */
-    Payment update(Payment payment);
+    Payment update(UUID id, Payment payment, UUID requesterId);
 
-    boolean delete(UUID id);
-
-    List<Payment> getAll();
-
-    List<Payment> getByOrderId(UUID orderId);
-
-    List<Payment> getByUserId(UUID userId);
+    /** The caller's own payments, most recent first. */
+    List<Payment> getByUserId(UUID requesterId);
 
     /**
-     * Moves a payment to a new status if the transition is allowed
-     * (PENDING -> COMPLETED/FAILED, FAILED -> PENDING, COMPLETED -> REFUNDED)
-     * and notifies the user. Returns null if the payment does not exist
-     * or the transition is not allowed.
+     * The payments attached to an order, but only when that order belongs to the caller.
+     * Returns an empty list otherwise, which is how a caller cannot probe for order existence.
      */
-    Payment updateStatus(UUID id, PaymentStatus status);
+    List<Payment> getByOrderId(UUID orderId, UUID requesterId);
+
+    /**
+     * Moves one of the caller's own payments through the lifecycle
+     * (PENDING -> COMPLETED/FAILED, FAILED -> PENDING, COMPLETED -> REFUNDED) and notifies the payer.
+     *
+     * <p>Refund is a decision about money leaving the business, so it is limited to FACULTY even
+     * though the payment is the caller's own. Returns null when the payment is missing, is not the
+     * caller's, the transition is not allowed, or the status requires a role the caller lacks.
+     */
+    Payment updateStatus(UUID id, PaymentStatus status, UUID requesterId, Role requesterRole);
 }

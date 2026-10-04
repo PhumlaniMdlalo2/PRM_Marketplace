@@ -25,6 +25,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * The cycle-breaking annotations must be direction-specific: back-references are hidden
  * from responses but still accepted on input, and identifiers must survive a round trip
  * so that update endpoints that key off the body's id keep working.
+ *
+ * <p>Payment and OrderItem are the exceptions, and deliberately so. Both are updated through a
+ * route that names the row in the path, and neither has a nested reference that needs an id from
+ * a body, so there is nothing left for a client-supplied id to do except let a request claim to be
+ * updating something it was not sent. Their ids are written out and ignored on the way in.
  */
 @SpringBootTest
 class EntityJsonRoundTripTest {
@@ -42,7 +47,7 @@ class EntityJsonRoundTripTest {
     }
 
     @Test
-    void paymentId_survivesRoundTrip() {
+    void paymentId_isWrittenButNotAcceptedFromAClient() {
         UUID id = UUID.randomUUID();
         Payment payment = new Payment.Builder()
                 .setId(id)
@@ -56,9 +61,34 @@ class EntityJsonRoundTripTest {
         String json = objectMapper.writeValueAsString(payment);
         assertThat(json).containsOnlyOnce("\"id\"");
 
+        // Payment is the exception to the round-trip rule: its update route names the payment in
+        // the path, so nothing needs an id from the body, and accepting one would only give a
+        // client a second way to name a payment. It is written out but ignored on the way in.
         Payment back = objectMapper.readValue(json, Payment.class);
-        assertThat(back.getId()).isEqualTo(id);
-        assertThat(back.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(back.getId()).isNull();
+    }
+
+    @Test
+    void paymentIgnoresServerOwnedFieldsSuppliedByAClient() throws Exception {
+        UUID clientId = UUID.randomUUID();
+        UUID clientUserId = UUID.randomUUID();
+
+        Payment submitted = objectMapper.readValue("""
+                {
+                  "id": "%s",
+                  "orderId": "%s",
+                  "userId": "%s",
+                  "amount": 780.00,
+                  "method": "CARD",
+                  "status": "COMPLETED",
+                  "transactionReference": "PAY-FORGED"
+                }
+                """.formatted(clientId, UUID.randomUUID(), clientUserId), Payment.class);
+
+        assertThat(submitted.getId()).isNull();
+        assertThat(submitted.getUserId()).isNull();
+        assertThat(submitted.getStatus()).isNull();
+        assertThat(submitted.getTransactionReference()).isNull();
     }
 
     @Test
@@ -150,7 +180,9 @@ class EntityJsonRoundTripTest {
         assertThat(addressJson).doesNotContain("\"user\"");
         String addressRequest = "{\"id\":\"" + address.getId() + "\",\"line1\":\"12 Main Road\","
                 + "\"user\":{\"id\":\"" + owner.getId() + "\"}}";
-        assertThat(objectMapper.readValue(addressRequest, Address.class).getUser()).isNotNull();
+        // Read-only, not write-only: the owner is never taken from the request body. The service
+        // assigns it from the token, so a body naming another account is discarded outright.
+        assertThat(objectMapper.readValue(addressRequest, Address.class).getUser()).isNull();
 
         Order order = new Order.Builder()
                 .setId(UUID.randomUUID())

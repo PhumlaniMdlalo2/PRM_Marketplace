@@ -20,8 +20,17 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     long countByConversationIdAndStatusNot(UUID conversationId, MessageStatus status);
 
+    /**
+     * Unread messages in a thread that the given account did not write. The sender filter is what
+     * keeps a person's own unread message out of their badge count.
+     */
+    long countByConversationIdAndStatusNotAndSender_IdNot(UUID conversationId,
+                                                        MessageStatus status,
+                                                        UUID senderId);
+
     @Modifying
-    @Query("update Message m set m.status = :status where m.conversation.id = :conversationId "
+    @Query("update Message m set m.status = :status, m.readAt = CURRENT_TIMESTAMP "
+            + "where m.conversation.id = :conversationId "
             + "and m.sender.id <> :senderId and m.status <> :status")
     int markConversationRead(@Param("conversationId") UUID conversationId,
                              @Param("senderId") UUID senderId,

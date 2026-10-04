@@ -6,6 +6,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -74,6 +77,30 @@ public class GlobalExceptionHandler {
         ex.getBindingResult().getFieldErrors()
                 .forEach(error -> fieldErrors.putIfAbsent(error.getField(), error.getDefaultMessage()));
         return build(HttpStatus.BAD_REQUEST, "Validation failed", request, fieldErrors);
+    }
+
+    /**
+     * A request to a URL the application does not serve is a 404, not an internal error. Without
+     * this the catch-all below reports every unmapped path as a 500 and logs a stack trace, which
+     * hides genuine server faults and makes a retired endpoint look like an outage.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Object> handleNoResource(NoResourceFoundException ex,
+                                                   HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND, "No endpoint " + request.getRequestURI(), request, null);
+    }
+
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<Object> handleNoHandler(NoHandlerFoundException ex,
+                                                  HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND, "No endpoint " + request.getRequestURI(), request, null);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Object> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
+                                                           HttpServletRequest request) {
+        return build(HttpStatus.METHOD_NOT_ALLOWED,
+                "Method " + request.getMethod() + " is not supported for this endpoint", request, null);
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,23 +1,43 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * A payment record. It is a financial record, so the client supplies only what describes the
+ * attempt: which order is being paid, how much, and by which method. Everything else is decided
+ * by the server.
+ *
+ * <p>The reason each field is read-only matters as much as the annotation:
+ * <ul>
+ *   <li>{@code userId} - a payment must belong to the caller who made it. It used to come from the
+ *       body, so a caller could file a payment against someone else's account.</li>
+ *   <li>{@code status} and {@code paidAt} - the payment lifecycle moves through
+ *       {@code updateStatus}, which validates the transition. Binding them let a caller write
+ *       COMPLETED directly and skip the state machine.</li>
+ *   <li>{@code transactionReference} - generated per payment and used to look the payment up.
+ *       Accepting one from the client risks colliding with or overwriting a real reference.</li>
+ *   <li>{@code id} - generated on save.</li>
+ * </ul>
+ */
 @Entity
 @Table(name = "payments")
 public class Payment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID id;
 
     @Column(nullable = false)
     private UUID orderId;
 
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID userId;
 
     @Column(nullable = false, precision = 10, scale = 2)
@@ -29,14 +49,18 @@ public class Payment {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private PaymentStatus status; // enum: PENDING, COMPLETED, FAILED, REFUNDED
 
     @Column(nullable = false, unique = true)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String transactionReference;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime paidAt;
 
     protected Payment() {

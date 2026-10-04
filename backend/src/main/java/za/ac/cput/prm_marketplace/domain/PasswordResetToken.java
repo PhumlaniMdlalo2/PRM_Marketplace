@@ -3,7 +3,6 @@ package za.ac.cput.prm_marketplace.domain;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -88,12 +87,12 @@ public class PasswordResetToken {
         if (this == o) return true;
         if (!(o instanceof PasswordResetToken)) return false;
         PasswordResetToken that = (PasswordResetToken) o;
-        return Objects.equals(id, that.id);
+        return id != null && id.equals(that.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

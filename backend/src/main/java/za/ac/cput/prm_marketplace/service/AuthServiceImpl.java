@@ -23,6 +23,8 @@ import za.ac.cput.prm_marketplace.security.JwtService;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -31,6 +33,10 @@ public class AuthServiceImpl implements IAuthService {
     private static final int CODE_LENGTH = 6;
     private static final long CODE_VALID_MINUTES = 15;
     private static final long RESET_TOKEN_VALID_MINUTES = 60;
+
+    /** Roles an account may pick for itself at signup. Faculty is granted out of band. */
+    private static final Set<Role> SELF_SERVICE_ROLES = EnumSet.of(
+            Role.STUDENT, Role.VENDOR, Role.RESIDENT);
 
     private final UserRepository userRepository;
     private final VerificationCodeRepository verificationCodeRepository;
@@ -70,7 +76,7 @@ public class AuthServiceImpl implements IAuthService {
                 .setName(request.name().trim())
                 .setEmail(email)
                 .setPasswordHash(passwordEncoder.encode(request.password()))
-                .setRole(request.role() == null ? Role.STUDENT : request.role())
+                .setRole(resolveRegistrationRole(request.role()))
                 .setPhone(request.phone())
                 .setVerified(false)
                 .build();
@@ -184,9 +190,9 @@ public class AuthServiceImpl implements IAuthService {
 
     @Override
     @Transactional
-    public void changePassword(String email, String currentPassword, String newPassword) {
-        User user = userRepository.findByEmail(normalise(email))
-                .orElseThrow(() -> new UnauthorizedException("Account not found"));
+    public void changePassword(UUID requesterId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(requesterId)
+                .orElseThrow(() -> new UnauthorizedException("Current password is incorrect"));
 
         if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new UnauthorizedException("Current password is incorrect");
@@ -194,6 +200,30 @@ public class AuthServiceImpl implements IAuthService {
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
+    }
+
+    /**
+     * The role a new account is allowed to sign up with.
+     *
+     * <p>Previously whatever the request body asked for was granted, so anybody could register as
+     * faculty. That matters here specifically because faculty supervises every order on the
+     * platform, not just their own: a self-registered faculty account is an escalation into other
+     * people's orders.
+     *
+     * <p>Faculty accounts are granted out of band, so a self-service signup asking for one is
+     * rejected rather than quietly downgraded. Silently substituting a lesser role would hand the
+     * caller a working account whose permissions are not what they asked for, which hides both the
+     * attempt and any client bug that caused it.
+     */
+    private static Role resolveRegistrationRole(Role requested) {
+        if (requested == null) {
+            return Role.STUDENT;
+        }
+        if (!SELF_SERVICE_ROLES.contains(requested)) {
+            throw new BadRequestException(
+                    "Role " + requested + " cannot be self-registered");
+        }
+        return requested;
     }
 
     private AuthResponse buildAuthResponse(User user) {

@@ -1,9 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -15,6 +16,7 @@ public class CartItem {
 
     @ManyToOne
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User user;
 
     @ManyToOne
@@ -25,6 +27,7 @@ public class CartItem {
     private int quantity;
 
     @Column(updatable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime addedAt;
 
     protected CartItem() {
@@ -69,12 +72,12 @@ public class CartItem {
         if (this == o) return true;
         if (!(o instanceof CartItem)) return false;
         CartItem cartItem = (CartItem) o;
-        return Objects.equals(id, cartItem.id);
+        return id != null && id.equals(cartItem.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return id == null ? 0 : id.hashCode();
     }
 
     @Override

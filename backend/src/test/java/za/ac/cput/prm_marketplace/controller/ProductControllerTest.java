@@ -1,11 +1,12 @@
 package za.ac.cput.prm_marketplace.controller;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -15,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.ProductCondition;
+import za.ac.cput.prm_marketplace.domain.Role;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
 import za.ac.cput.prm_marketplace.dto.ProductSearchCriteria;
 import za.ac.cput.prm_marketplace.factory.ProductFactory;
 import za.ac.cput.prm_marketplace.service.IProductService;
@@ -25,15 +28,20 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
 
-@WebMvcTest(ProductController.class)
-@AutoConfigureMockMvc(addFilters = false)
-public class ProductControllerTest {
+/**
+ * Browsing stays public. Writes are scoped to the seller in the token, so the regression tests here
+ * are about what a caller can no longer do: publish under another vendor, edit a competitor's
+ * listing, or hard delete a listing that an order line still points at.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+class ProductControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -44,30 +52,137 @@ public class ProductControllerTest {
     @MockitoBean
     private IProductService productService;
 
+    private UUID vendorId;
+    private UUID otherVendorId;
+    private UUID sellerId;
+    private UUID intruderId;
     private Product laptop;
     private Product phone;
-    private UUID vendorId;
 
     @BeforeEach
     void setUp() {
         vendorId = UUID.randomUUID();
+        otherVendorId = UUID.randomUUID();
+        sellerId = UUID.randomUUID();
+        intruderId = UUID.randomUUID();
+
         laptop = ProductFactory.createProduct("Laptop", "15 inch", new BigDecimal("8999.99"),
                 "Electronics", 5, vendorId);
         phone = ProductFactory.createProduct("Phone", "128GB", new BigDecimal("4999.00"),
                 "Electronics", 10, vendorId);
     }
 
+    // create
+
     @Test
+    @DisplayName("a seller can list a product and the listing is returned")
     void create_returnsCreatedProduct() throws Exception {
-        when(productService.create(any(Product.class))).thenReturn(laptop);
+        when(productService.create(any(Product.class), eq(sellerId))).thenReturn(laptop);
 
         mockMvc.perform(post("/api/products")
+                        .with(as(sellerId, Role.VENDOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(laptop)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("Laptop"))
                 .andExpect(jsonPath("$.category").value("Electronics"));
     }
+
+    @Test
+    @DisplayName("the service is given the caller's id, not anything from the body")
+    void create_passesTheCallerToTheService() throws Exception {
+        when(productService.create(any(Product.class), eq(sellerId))).thenReturn(laptop);
+
+        mockMvc.perform(post("/api/products")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
+                .andExpect(status().isCreated());
+
+        verify(productService).create(any(Product.class), eq(sellerId));
+    }
+
+    @Test
+    @DisplayName("a body naming another vendor does not get that vendor into the listing")
+    void create_bodyVendorIsStrippedBeforeTheServiceSeesIt() throws Exception {
+        when(productService.create(any(Product.class), eq(sellerId))).thenReturn(laptop);
+
+        String hostile = """
+                {
+                  "name": "Laptop",
+                  "price": 8999.99,
+                  "stockQuantity": 5,
+                  "category": "Electronics",
+                  "createdAt": "2000-01-01T00:00:00",
+                  "vendor": {"id": "%s", "businessName": "Someone Else", "verified": true}
+                }
+                """.formatted(otherVendorId);
+
+        mockMvc.perform(post("/api/products")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(hostile))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productService).create(captor.capture(), eq(sellerId));
+
+        assertNull(captor.getValue().getVendor(), "vendor must come from the token, not the body");
+        assertNull(captor.getValue().getCreatedAt(), "creation time is server-owned");
+    }
+
+    @Test
+    @DisplayName("images supplied in the body are stripped, so the cascaded collection cannot be written")
+    void create_bodyImagesAreStrippedBeforeTheServiceSeesIt() throws Exception {
+        when(productService.create(any(Product.class), eq(sellerId))).thenReturn(laptop);
+
+        String hostile = """
+                {
+                  "name": "Laptop",
+                  "price": 8999.99,
+                  "stockQuantity": 5,
+                  "category": "Electronics",
+                  "images": [{"imageUrl": "https://attacker.example.com/x.jpg", "primary": true}]
+                }
+                """;
+
+        mockMvc.perform(post("/api/products")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(hostile))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productService).create(captor.capture(), eq(sellerId));
+
+        assertTrue(captor.getValue().getImages().isEmpty(),
+                "a request must not be able to write the cascaded image collection");
+    }
+
+    @Test
+    @DisplayName("a caller with no vendor profile gets a bad request, not a listing")
+    void create_withoutAVendorProfile_returnsBadRequest() throws Exception {
+        when(productService.create(any(Product.class), eq(sellerId))).thenReturn(null);
+
+        mockMvc.perform(post("/api/products")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot list a product")
+    void create_rejectsAnonymous() throws Exception {
+        mockMvc.perform(post("/api/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(productService);
+    }
+
+    // read
 
     @Test
     void read_existingProduct_returnsOk() throws Exception {
@@ -89,26 +204,132 @@ public class ProductControllerTest {
     }
 
     @Test
-    void delete_existingProduct_returnsNoContent() throws Exception {
+    @DisplayName("a product response no longer carries the lazy image collection")
+    void read_doesNotSerialiseTheImageCollection() throws Exception {
         UUID id = UUID.randomUUID();
-        when(productService.read(id)).thenReturn(laptop);
+        Product withImage = ProductFactory.createProduct("Laptop", "15 inch",
+                new BigDecimal("8999.99"), "Electronics", 5, vendorId);
+        withImage.addImage(new za.ac.cput.prm_marketplace.domain.ProductImage.Builder()
+                .setProduct(withImage)
+                .setImageUrl("https://cdn.example.com/1.jpg")
+                .build());
+        when(productService.read(id)).thenReturn(withImage);
 
-        mockMvc.perform(delete("/api/products/{id}", id))
-                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/products/{id}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.images").doesNotExist());
+    }
 
-        verify(productService).delete(id);
+    // update
+
+    @Test
+    @DisplayName("a seller can edit their own listing")
+    void update_ownProduct_returnsOk() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(productService.update(eq(id), any(Product.class), eq(sellerId))).thenReturn(laptop);
+
+        mockMvc.perform(put("/api/products/{id}", id)
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Laptop"));
     }
 
     @Test
-    void delete_missingProduct_returnsNotFoundAndDoesNotDelete() throws Exception {
+    @DisplayName("editing a competitor's listing reads as not found")
+    void update_somebodyElsesProduct_returnsNotFound() throws Exception {
         UUID id = UUID.randomUUID();
-        when(productService.read(id)).thenReturn(null);
+        when(productService.update(eq(id), any(Product.class), eq(intruderId))).thenReturn(null);
 
-        mockMvc.perform(delete("/api/products/{id}", id))
+        mockMvc.perform(put("/api/products/{id}", id)
+                        .with(as(intruderId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
                 .andExpect(status().isNotFound());
-
-        verify(productService, never()).delete(any(UUID.class));
     }
+
+    @Test
+    @DisplayName("a body id cannot redirect the edit onto a different listing")
+    void update_bodyIdIsIgnored() throws Exception {
+        UUID id = UUID.randomUUID();
+        UUID decoy = UUID.randomUUID();
+        when(productService.update(eq(id), any(Product.class), eq(sellerId))).thenReturn(laptop);
+
+        Product hostile = Product.builder()
+                .copy(laptop)
+                .id(decoy)
+                .vendor(new VendorProfile.Builder().setId(otherVendorId).build())
+                .build();
+
+        mockMvc.perform(put("/api/products/{id}", id)
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(hostile)))
+                .andExpect(status().isOk());
+
+        verify(productService).update(eq(id), any(Product.class), eq(sellerId));
+        verify(productService, never()).update(eq(decoy), any(Product.class), any(UUID.class));
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot edit a listing")
+    void update_rejectsAnonymous() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        mockMvc.perform(put("/api/products/{id}", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(laptop)))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(productService);
+    }
+
+    // delete
+
+    @Test
+    @DisplayName("there is no delete route: a sold listing cannot be removed by id")
+    void deleteIsNotAvailable() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/products/{id}", id).with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isMethodNotAllowed());
+
+        verifyNoInteractions(productService);
+    }
+
+    // getMine
+
+    @Test
+    @DisplayName("the caller's own listings are scoped to the token")
+    void getMine_isScopedToTheCaller() throws Exception {
+        when(productService.getMine(sellerId)).thenReturn(List.of(laptop, phone));
+
+        mockMvc.perform(get("/api/products/mine").with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("another seller's listings are not returned")
+    void getMine_somebodyElseGetsNothing() throws Exception {
+        when(productService.getMine(intruderId)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/products/mine").with(as(intruderId, Role.VENDOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot list somebody's own listings")
+    void getMine_rejectsAnonymous() throws Exception {
+        mockMvc.perform(get("/api/products/mine"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(productService);
+    }
+
+    // public browsing
 
     @Test
     void getAll_returnsAllProducts() throws Exception {

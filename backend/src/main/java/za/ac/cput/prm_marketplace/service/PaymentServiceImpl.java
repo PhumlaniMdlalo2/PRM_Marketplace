@@ -3,11 +3,15 @@ package za.ac.cput.prm_marketplace.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.NotificationType;
+import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.factory.PaymentFactory;
+import za.ac.cput.prm_marketplace.repository.OrderRepository;
 import za.ac.cput.prm_marketplace.repository.PaymentRepository;
 
 import java.math.BigDecimal;
@@ -23,25 +27,41 @@ public class PaymentServiceImpl implements IPaymentService {
     private static final Logger log = LoggerFactory.getLogger(PaymentServiceImpl.class);
 
     private final PaymentRepository paymentRepository;
+    private final OrderRepository orderRepository;
     private final INotificationService notificationService;
 
     public PaymentServiceImpl(PaymentRepository paymentRepository,
+                              OrderRepository orderRepository,
                               INotificationService notificationService) {
         this.paymentRepository = paymentRepository;
+        this.orderRepository = orderRepository;
         this.notificationService = notificationService;
     }
 
     @Override
-    public Payment create(Payment payment) {
-        if (payment == null) {
+    @Transactional
+    public Payment create(Payment payment, UUID requesterId) {
+        if (payment == null || requesterId == null) {
             return null;
         }
 
-        // The factory validates the input and sets status = PENDING,
-        // a transaction reference and createdAt.
+        // The order has to belong to the caller. Resolving it through the owner-scoped finder is
+        // what stops a payment being filed against somebody else's order.
+        Order order = orderRepository.findByIdAndBuyerId(payment.getOrderId(), requesterId).orElse(null);
+        if (order == null) {
+            return null;
+        }
+
+        BigDecimal amount = resolveAmount(payment.getAmount(), order);
+        if (amount == null) {
+            return null;
+        }
+
+        // The factory validates the remaining input and sets status = PENDING, a unique
+        // transaction reference and createdAt. requesterId is passed as the payer, never the one
+        // the client supplied.
         Payment validated = PaymentFactory.createPayment(
-                payment.getOrderId(), payment.getUserId(),
-                payment.getAmount(), payment.getMethod());
+                order.getId(), requesterId, amount, payment.getMethod());
 
         if (validated == null) {
             return null;
@@ -49,84 +69,93 @@ public class PaymentServiceImpl implements IPaymentService {
         return paymentRepository.save(validated);
     }
 
-    @Override
-    public Payment read(UUID id) {
-        if (id == null) {
+    /**
+     * An omitted amount means "pay the whole order". A supplied amount is accepted up to the order
+     * total, so a client cannot inflate a payment beyond what it owes.
+     *
+     * <p>This is a ceiling rather than an exact match on purpose. One order can end up carrying
+     * several payments, and nothing in the model records how much has already been paid, so
+     * demanding the exact total would make partial payments impossible to express. Tightening this
+     * to an exact match belongs with the order/settlement work that tracks amounts paid.
+     */
+    private static BigDecimal resolveAmount(BigDecimal requested, Order order) {
+        BigDecimal total = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
+
+        if (requested == null) {
+            return total.compareTo(BigDecimal.ZERO) > 0 ? total : null;
+        }
+
+        if (requested.compareTo(BigDecimal.ZERO) <= 0 || requested.compareTo(total) > 0) {
             return null;
         }
-        return paymentRepository.findById(id).orElse(null);
+        return requested.setScale(2, RoundingMode.HALF_UP);
     }
 
     @Override
-    public Payment update(Payment payment) {
-        if (payment == null || payment.getId() == null) {
+    public Payment read(UUID id, UUID requesterId) {
+        if (id == null || requesterId == null) {
+            return null;
+        }
+        return paymentRepository.findByIdAndUserId(id, requesterId).orElse(null);
+    }
+
+    @Override
+    @Transactional
+    public Payment update(UUID id, Payment payment, UUID requesterId) {
+        if (id == null || payment == null || requesterId == null) {
             return null;
         }
 
-        Payment existing = paymentRepository.findById(payment.getId()).orElse(null);
-
+        Payment existing = paymentRepository.findByIdAndUserId(id, requesterId).orElse(null);
         if (existing == null || existing.getStatus() != PaymentStatus.PENDING) {
             return null;
         }
 
-        BigDecimal amount = existing.getAmount();
-        if (payment.getAmount() != null && payment.getAmount().compareTo(BigDecimal.ZERO) > 0) {
-            amount = payment.getAmount().setScale(2, RoundingMode.HALF_UP);
-        }
-
-        PaymentMethod method = payment.getMethod() != null
-                ? payment.getMethod()
-                : existing.getMethod();
-
+        // Only the method moves. The amount, payer, status and reference are carried over from the
+        // stored row, so a request body cannot rewrite any of them.
         Payment updated = new Payment.Builder()
                 .copy(existing)
-                .setAmount(amount)
-                .setMethod(method)
+                .setMethod(payment.getMethod() != null ? payment.getMethod() : existing.getMethod())
                 .build();
 
         return paymentRepository.save(updated);
     }
 
     @Override
-    public boolean delete(UUID id) {
-        if (id == null || !paymentRepository.existsById(id)) {
-            return false;
+    public List<Payment> getByUserId(UUID requesterId) {
+        if (requesterId == null) {
+            return Collections.emptyList();
         }
-
-        paymentRepository.deleteById(id);
-        return true;
+        return paymentRepository.findByUserIdOrderByCreatedAtDesc(requesterId);
     }
 
     @Override
-    public List<Payment> getAll() {
-        return paymentRepository.findAll();
-    }
-
-    @Override
-    public List<Payment> getByOrderId(UUID orderId) {
-        if (orderId == null) {
+    public List<Payment> getByOrderId(UUID orderId, UUID requesterId) {
+        if (orderId == null || requesterId == null) {
+            return Collections.emptyList();
+        }
+        // Confirm the order belongs to the caller before returning anything attached to it,
+        // otherwise this is a readable payment history for any order id.
+        if (!orderRepository.existsByIdAndBuyerId(orderId, requesterId)) {
             return Collections.emptyList();
         }
         return paymentRepository.findByOrderId(orderId);
     }
 
     @Override
-    public List<Payment> getByUserId(UUID userId) {
-        if (userId == null) {
-            return Collections.emptyList();
-        }
-        return paymentRepository.findByUserId(userId);
-    }
-
-    @Override
-    public Payment updateStatus(UUID id, PaymentStatus status) {
-        if (id == null || status == null) {
+    @Transactional
+    public Payment updateStatus(UUID id, PaymentStatus status, UUID requesterId, Role requesterRole) {
+        if (id == null || status == null || requesterId == null) {
             return null;
         }
 
-        Payment existing = paymentRepository.findById(id).orElse(null);
-
+        Payment existing = paymentRepository.findByIdAndUserId(id, requesterId).orElse(null);
         if (existing == null || !isValidTransition(existing.getStatus(), status)) {
+            return null;
+        }
+
+        if (status == PaymentStatus.REFUNDED && requesterRole != Role.FACULTY) {
+            // Paying money back out is not the payer's decision, even on their own payment.
             return null;
         }
 
@@ -191,4 +220,3 @@ public class PaymentServiceImpl implements IPaymentService {
         }
     }
 }
-

@@ -1,9 +1,11 @@
 package za.ac.cput.prm_marketplace.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
 import za.ac.cput.prm_marketplace.repository.OrderItemRepository;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,42 +19,22 @@ public class OrderItemServiceImpl implements IOrderItemService {
     }
 
     @Override
-    public OrderItem create(OrderItem orderItem) {
-        if (orderItem == null) {
+    @Transactional(readOnly = true)
+    public OrderItem read(UUID id, UUID requesterId) {
+        if (id == null || requesterId == null) {
             return null;
         }
-        return orderItemRepository.save(orderItem);
+        // Ownership is checked through the order's buyer, so a line item belonging to another
+        // account reads as missing instead of as somebody else's purchase.
+        return orderItemRepository.findByIdAndOrderBuyerId(id, requesterId).orElse(null);
     }
 
     @Override
-    public OrderItem read(UUID id) {
-        if (id == null) {
-            return null;
+    @Transactional(readOnly = true)
+    public List<OrderItem> getByOrderId(UUID orderId, UUID requesterId) {
+        if (orderId == null || requesterId == null) {
+            return Collections.emptyList();
         }
-        return orderItemRepository.findById(id).orElse(null);
-    }
-
-    @Override
-    public OrderItem update(OrderItem orderItem) {
-        if (orderItem == null || orderItem.getId() == null ||
-                !orderItemRepository.existsById(orderItem.getId())) {
-            return null;
-        }
-        return orderItemRepository.save(orderItem);
-    }
-
-    @Override
-    public boolean delete(UUID id) {
-        if (id == null || !orderItemRepository.existsById(id)) {
-            return false;
-        }
-
-        orderItemRepository.deleteById(id);
-        return true;
-    }
-
-    @Override
-    public List<OrderItem> getAll() {
-        return orderItemRepository.findAll();
+        return orderItemRepository.findByOrderIdAndOrderBuyerIdOrderByCreatedAtAsc(orderId, requesterId);
     }
 }
