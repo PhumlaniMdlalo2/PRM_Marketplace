@@ -1,5 +1,5 @@
 import { Heart, Star, ShieldCheck, MessageSquare } from 'lucide-react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useCallback, useState } from 'react';
 import Button from '../components/ui/Button';
 import Avatar from '../components/ui/Avatar';
@@ -7,12 +7,19 @@ import BackButton from '../components/ui/BackButton';
 import ProductCard from '../components/ui/ProductCard';
 import Layout from '../components/layout/Layout';
 import { getById, listByCategory, listReviews } from '../api/products';
+import { addCartItem } from '../api/cart';
+import { startConversation } from '../api/messages';
 import { formatCondition, formatLocation, formatPrice, toCardProps } from '../lib/format';
 import { useAsync } from '../hooks/useAsync';
+import { useFavourites } from '../hooks/useFavourites';
+import { useAuth } from '../auth/useAuth';
 
 const ProductDetails = () => {
   const { id } = useParams();
-  const [isFavourite, setIsFavourite] = useState(false);
+  const navigate = useNavigate();
+  const { isAuthenticated, user } = useAuth();
+  const [buying, setBuying] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   const loadProduct = useCallback(() => getById(id), [id]);
   const loadReviews = useCallback(() => listReviews(id).catch(() => []), [id]);
@@ -43,6 +50,80 @@ const ProductDetails = () => {
     .filter((item) => item.id !== product?.id)
     .slice(0, 5)
     .map(toCardProps);
+
+  // The heart here used to be local state, so it was empty on every visit and forgot itself on
+  // refresh. It now reads the caller's saved set, which is also what the cards in "Similar items"
+  // below need, so the two agree with each other and with the Saved items page.
+  const favourites = useFavourites();
+
+  const returnTo = `/product/${id}`;
+  const requireSignIn = () => navigate('/login', { state: { from: { pathname: returnTo } } });
+
+  const onFavouriteToggle = async () => {
+    if (!isAuthenticated) {
+      requireSignIn();
+      return;
+    }
+    await favourites.toggle(id);
+  };
+
+  /**
+   * "Buy now" adds the item to the cart and goes to the cart, which is where the actual checkout
+   * decision happens. There is no one-click purchase anywhere in this API — an order is created from
+   * a cart — so a button labelled Buy now that quietly did nothing was worse than one that says
+   * where it takes you.
+   */
+  const onBuyNow = async () => {
+    if (!isAuthenticated) {
+      requireSignIn();
+      return;
+    }
+    if (buying) return;
+    setBuying(true);
+    setActionError(null);
+    try {
+      await addCartItem(id, 1);
+      navigate('/cart');
+    } catch (caught) {
+      // Out of stock is the common case here. A seller is stopped from reaching this button at all,
+      // but the server does not refuse a seller adding their own listing, so the message is shown
+      // rather than swallowed whichever reason came back.
+      setActionError(caught.message);
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  /**
+   * "Contact" opens a conversation with the seller, threading the listing through so the seller can
+   * see what is being asked about.
+   */
+  const onContact = async () => {
+    if (!isAuthenticated) {
+      requireSignIn();
+      return;
+    }
+    const sellerId = product?.vendor?.userId ?? product?.vendor?.id;
+    if (!sellerId) {
+      setActionError('This listing has no seller to contact.');
+      return;
+    }
+    if (buying) return;
+    setBuying(true);
+    setActionError(null);
+    try {
+      const conversation = await startConversation(sellerId, id);
+      navigate(`/messages/${conversation.id}`);
+    } catch (caught) {
+      setActionError(caught.message);
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  // Contacting yourself is a dead end: the conversation would be with you, and the message would sit
+  // unread forever because the other side is the person reading it.
+  const isOwnListing = isAuthenticated && product?.vendor?.userId === user?.id;
 
   if (loading) {
     return (
@@ -83,13 +164,17 @@ const ProductDetails = () => {
         <div className="app-container py-4 flex items-center justify-between">
           <BackButton />
           <button
-            onClick={() => setIsFavourite(!isFavourite)}
-            className="p-2 rounded-full hover:bg-lavender transition-all duration-200 active:scale-90"
-            aria-label={isFavourite ? 'Remove from favourites' : 'Add to favourites'}
+            onClick={onFavouriteToggle}
+            disabled={favourites.busyProductId === id}
+            className="p-2 rounded-full hover:bg-lavender transition-all duration-200 active:scale-90 disabled:opacity-60"
+            aria-label={
+              favourites.isFavourite(id) ? 'Remove from favourites' : 'Add to favourites'
+            }
+            aria-pressed={favourites.isFavourite(id)}
           >
             <Heart
               size={24}
-              className={`transition-colors ${isFavourite ? 'fill-error text-error' : 'text-text-secondary'}`}
+              className={`transition-colors ${favourites.isFavourite(id) ? 'fill-error text-error' : 'text-text-secondary'}`}
             />
           </button>
         </div>
@@ -179,7 +264,11 @@ const ProductDetails = () => {
                 {similarProducts.map((item) => (
                   <div key={item.id} className="flex-shrink-0 w-40">
                     <Link to={`/product/${item.id}`}>
-                      <ProductCard {...item} />
+                      <ProductCard
+                        {...item}
+                        isFavourite={favourites.isFavourite(item.id)}
+                        onFavouriteToggle={() => favourites.toggle(item.id)}
+                      />
                     </Link>
                   </div>
                 ))}
@@ -190,11 +279,27 @@ const ProductDetails = () => {
 
         <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-border p-4 z-40 safe-area-inset-bottom">
           <div className="app-container flex gap-3">
-            <Button variant="secondary" className="flex-1">
+            {(actionError || favourites.error) && (
+              <p role="alert" className="mb-2 text-sm text-error">
+                {actionError ?? favourites.error}
+              </p>
+            )}
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={onContact}
+              disabled={buying || isOwnListing}
+            >
               <MessageSquare size={18} />
-              Contact
+              {isOwnListing ? 'Your listing' : 'Contact'}
             </Button>
-            <Button className="flex-[1.4]">Buy now</Button>
+            <Button
+              className="flex-[1.4]"
+              onClick={onBuyNow}
+              disabled={buying || isOwnListing}
+            >
+              {buying ? 'Working…' : 'Buy now'}
+            </Button>
           </div>
         </div>
       </div>

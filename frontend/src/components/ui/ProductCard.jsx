@@ -1,24 +1,30 @@
 import { Heart } from 'lucide-react';
-import { useState } from 'react';
 
-const ProductCard = ({ 
-  name, 
-  price, 
-  location, 
-  image, 
-  isFavourite = false, 
+/**
+ * A product card. The heart is controlled: `isFavourite` says whether the product is saved and
+ * `onFavouriteToggle` reports a tap, so the parent decides what happens and a save the server
+ * rejects cannot leave a filled heart lying about the database.
+ *
+ * There used to be a second mode here where the card kept its own state and the heart flipped
+ * locally with nothing persisted. Every page that used it is now wired, so the mode is gone: a heart
+ * that appears to work but is forgotten on refresh is worse than one the user is told does not work.
+ */
+const ProductCard = ({
+  name,
+  price,
+  location,
+  image,
+  isFavourite = false,
   onFavouriteToggle,
-  onClick 
+  onClick
 }) => {
-  const [favourite, setFavourite] = useState(isFavourite);
-  
   const handleFavouriteToggle = (e) => {
+    // The card is wrapped in a link on some pages, so without this the heart navigates as well.
     e.stopPropagation();
-    const next = !favourite;
-    setFavourite(next);
-    onFavouriteToggle?.(next);
+    e.preventDefault();
+    if (onFavouriteToggle) onFavouriteToggle();
   };
-  
+
   return (
     <article 
       onClick={onClick}
@@ -40,11 +46,12 @@ const ProductCard = ({
         <button
           onClick={handleFavouriteToggle}
           className="absolute top-2.5 right-2.5 p-2 bg-white/90 backdrop-blur rounded-full shadow-sm hover:bg-white transition-all duration-200 active:scale-90"
-          aria-label={favourite ? `Remove ${name} from favourites` : `Add ${name} to favourites`}
+          aria-label={isFavourite ? `Remove ${name} from favourites` : `Add ${name} to favourites`}
+          aria-pressed={isFavourite}
         >
-          <Heart 
-            size={17} 
-            className={`transition-all duration-200 ${favourite ? 'fill-error text-error' : 'text-text-muted'}`} 
+          <Heart
+            size={17}
+            className={`transition-all duration-200 ${isFavourite ? 'fill-error text-error' : 'text-text-muted'}`}
           />
         </button>
       </div>

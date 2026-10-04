@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import SearchBar from '../components/ui/SearchBar';
@@ -9,10 +9,31 @@ import Layout from '../components/layout/Layout';
 import { search } from '../api/products';
 import { toCardProps } from '../lib/format';
 import { useAsync } from '../hooks/useAsync';
+import { useFavourites } from '../hooks/useFavourites';
 
 // The categories the backend actually stores. These are the values the Product.category column is
 // compared against, so they are not free-text labels chosen for the UI.
-const categories = ['All', 'Furniture', 'Electronics', 'Fashion', 'Bikes'];
+const categories = ['Furniture', 'Electronics', 'Fashion', 'Bikes'];
+
+/**
+ * Renders a grid of product cards with working hearts.
+ *
+ * `favourites` is passed in rather than fetched here so one hook instance serves the whole page
+ * instead of every card asking for the saved set on its own.
+ */
+const FavouritedGrid = ({ products, favourites, onNavigate }) => (
+  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+    {products.map((product) => (
+      <ProductCard
+        key={product.id}
+        {...product}
+        isFavourite={favourites.isFavourite(product.id)}
+        onFavouriteToggle={() => favourites.toggle(product.id)}
+        onClick={() => onNavigate(product.id)}
+      />
+    ))}
+  </div>
+);
 
 const Home = () => {
   const { hash } = useLocation();
@@ -35,6 +56,7 @@ const Home = () => {
   const { data, loading, error } = useAsync(loadFeatured);
 
   const products = (data?.content ?? []).map(toCardProps);
+  const favourites = useFavourites();
 
   useEffect(() => {
     if (hash === '#for-you' && forYouRef.current) {
@@ -42,33 +64,41 @@ const Home = () => {
     }
   }, [hash]);
 
+  const openProduct = (id) => navigate(`/product/${id}`);
+
   return (
     <Layout>
       <div className="app-container py-6">
         <div className="max-w-2xl pt-4">
-          <SearchBar 
+          <SearchBar
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="mb-6"
           />
         </div>
-        
+
         <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide" role="tablist" aria-label="Product categories">
-          <CategoryChip 
-            label="All" 
+          <CategoryChip
+            label="All"
             isSelected={selectedCategory === 'All'}
             onClick={() => setSelectedCategory('All')}
           />
           {categories.map((category) => (
-            <CategoryChip 
+            <CategoryChip
               key={category}
-              label={category} 
+              label={category}
               isSelected={selectedCategory === category}
               onClick={() => setSelectedCategory(category)}
             />
           ))}
         </div>
-        
+
+        {favourites.error && (
+          <p role="alert" className="mb-4 text-sm text-error">
+            {favourites.error}
+          </p>
+        )}
+
         <div className="mt-7">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-text-primary">Featured items</h2>
@@ -90,15 +120,7 @@ const Home = () => {
               <p className="text-text-secondary">No items match your search</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
-              {products.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  {...product}
-                  onClick={() => navigate(`/product/${product.id}`)}
-                />
-              ))}
-            </div>
+            <FavouritedGrid products={products} favourites={favourites} onNavigate={openProduct} />
           )}
         </div>
 
@@ -118,6 +140,7 @@ export default Home;
  * ranking actually built.
  */
 const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
+  const navigate = useNavigate();
   const [fyCategory, setFyCategory] = useState('All');
 
   const loadForYou = useCallback(
@@ -135,6 +158,11 @@ const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
   const { data, loading } = useAsync(loadForYou);
 
   const items = (data?.content ?? []).map(toCardProps);
+  // A second hook instance, deliberately. Sharing one with the section above would mean the two
+  // sections hold two independent copies of the same saved set, so saving in one would leave the
+  // other stale until it refetched — one instance each is simpler to reason about than one shared
+  // copy kept in sync across two lists that are fetched separately anyway.
+  const favourites = useFavourites();
 
   return (
     <section ref={ref} id="for-you" className="mt-12 border-t border-border pt-8 scroll-mt-20">
@@ -175,11 +203,11 @@ const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
             <p className="text-text-secondary">Nothing listed here yet</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
-            {items.map((product) => (
-              <ProductCard key={product.id} {...product} />
-            ))}
-          </div>
+          <FavouritedGrid
+            products={items}
+            favourites={favourites}
+            onNavigate={(id) => navigate(`/product/${id}`)}
+          />
         )}
       </div>
     </section>

@@ -24,9 +24,10 @@ const persistUser = (user) => {
 };
 
 export function AuthProvider({ children }) {
-  // The session is rebuilt from localStorage on first render rather than fetched. The token
-  // carries no readable payload, and the backend exposes no "/me" endpoint to refresh the user
-  // from, so the stored copy is the only source available without a new backend route.
+  // The session is rebuilt from localStorage on first render rather than fetched, so the first paint
+  // of an authenticated page does not wait on a round trip. `GET /api/users/me` does exist and is
+  // what the profile page reads; `refreshUser` uses it to correct the stored copy whenever the server
+  // is the authority and the stored copy may be stale.
   //
   // Both values initialise synchronously, which is why there is no "loading" flag here: by the time
   // this component's first render commits, the session is already known, and a flag that starts true
@@ -77,6 +78,21 @@ export function AuthProvider({ children }) {
 
   const verifyAccount = useCallback(async (email, code) => authApi.verifyCode(email, code), []);
 
+  /**
+   * Adopts an account the server has just returned.
+   *
+   * A profile edit changes the name and avatar that the header, the nav and every "your listings"
+   * label read out of this context, so the stored copy has to be replaced with the saved one. The
+   * alternative — leaving it — leaves the UI showing the old name until the next sign-in, which
+   * reads as the save having failed.
+   */
+  const applyUser = useCallback((nextUser) => {
+    if (!nextUser) return null;
+    persistUser(nextUser);
+    setUser(nextUser);
+    return nextUser;
+  }, []);
+
   const value = useMemo(() => ({
     user,
     token,
@@ -86,7 +102,8 @@ export function AuthProvider({ children }) {
     signUp,
     signOut,
     verifyAccount,
-  }), [user, token, signIn, signUp, signOut, verifyAccount]);
+    applyUser,
+  }), [user, token, signIn, signUp, signOut, verifyAccount, applyUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

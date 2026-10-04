@@ -49,17 +49,12 @@ export const listMessages = async (conversationId) => {
 /**
  * Sends a message.
  *
- * The text travels as a `body` query parameter rather than in a request body, because that is how
- * the endpoint is written. See the note on MessageController — this belongs in the body, and until
- * it moves, message text will appear in server access logs. Nothing on the client can prevent that,
- * so it is flagged rather than worked around.
+ * The text goes in a JSON body. It used to ride as a `body` query parameter, which put every private
+ * message into server access logs, proxy logs and the sender's browser history — a wider audience
+ * than the two people in the thread.
  */
 export const sendMessage = async (conversationId, body) => {
-  const { data } = await api.post(
-    `/messages/conversation/${conversationId}/send`,
-    null,
-    { params: { body } },
-  );
+  const { data } = await api.post(`/messages/conversation/${conversationId}/send`, { body });
   return data;
 };
 

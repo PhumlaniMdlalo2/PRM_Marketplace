@@ -1,0 +1,121 @@
+/**
+ * Everything the create and edit listing forms share: the option lists, the one place a listing's
+ * fields are read and written, and the validation.
+ *
+ * This is shared because the two forms were already near-identical mocks, and the rules the server
+ * enforces in ProductFactory live in one place here so a change to either side is a one-line diff.
+ */
+
+/** Mirrors the ProductCondition enum. The labels are what the UI shows, the values are what it sends. */
+export const CONDITION_OPTIONS = [
+  { value: 'NEW', label: 'New' },
+  { value: 'LIKE_NEW', label: 'Like new' },
+  { value: 'GOOD', label: 'Good' },
+  { value: 'FAIR', label: 'Fair' },
+  { value: 'POOR', label: 'Poor' },
+];
+
+/**
+ * Category is a free-text column on the server rather than a table, so there is no endpoint to list
+ * them. These are the values the seeded marketplace actually uses, and the only ones the search and
+ * category routes have ever been pointed at, which makes them the useful suggestions. A seller can
+ * still type their own: a category nobody filters on yet is better than not being able to categorise
+ * the item at all.
+ */
+export const CATEGORY_OPTIONS = ['BIKES', 'ELECTRONICS', 'FURNITURE'];
+
+/** Blank form. Quantity starts at 1 rather than 0, because 0 would publish an item nobody can buy. */
+export const emptyListingForm = () => ({
+  name: '',
+  category: '',
+  price: '',
+  stock: '1',
+  description: '',
+  location: '',
+  condition: 'NEW',
+  active: true,
+});
+
+/**
+ * The product stores city and province separately but the form shows one location field, typed as
+ * "Cape Town, Western Cape". Splitting on the first comma only, so a suburb containing a comma
+ * cannot end up half-swallowed: "Chopin, 12 Nelson Mandela St, Western Cape" still reads as the city
+ * "Chopin".
+ */
+export const parseLocation = (value) => {
+  const [city, ...rest] = String(value ?? '').split(',');
+  return { city: city.trim(), province: rest.join(',').trim() };
+};
+
+/** The inverse of parseLocation, for filling the form from a product the server already has. */
+export const formatLocation = ({ city, province } = {}) =>
+  [city, province].filter(Boolean).join(', ');
+
+/** Turns a stored product into form values. Price is stringified because the inputs are text. */
+export const listingFromProduct = (product) => ({
+  name: product.name ?? '',
+  category: product.category ?? '',
+  price: product.price != null ? String(product.price) : '',
+  stock: product.stockQuantity != null ? String(product.stockQuantity) : '',
+  description: product.description ?? '',
+  location: formatLocation(product),
+  condition: product.condition ?? 'NEW',
+  active: product.active ?? true,
+});
+
+/**
+ * Form values into a request body.
+ *
+ * No `active` field: the server ignores it on update, so sending it would look like it worked while
+ * doing nothing. Retiring is a separate call, which EditListing makes after saving.
+ *
+ * `imageUrl` is passed in by the caller because a create has none while an edit must hand back the
+ * stored one - the server replaces that field with whatever non-null value it is given, including an
+ * empty string, so omitting it is not the way to leave it alone.
+ */
+export const toListingPayload = (values, { imageUrl = '' } = {}) => {
+  const { city, province } = parseLocation(values.location);
+  return {
+    name: values.name.trim(),
+    description: values.description.trim(),
+    price: Number(values.price),
+    stockQuantity: Number(values.stock),
+    category: values.category.trim(),
+    condition: values.condition,
+    city,
+    province,
+    imageUrl,
+  };
+};
+
+/**
+ * The same rules ProductFactory enforces on the server, so the message can sit next to the field that
+ * caused it. The server's rejection carries no body, so this is the only place the user is told
+ * anything. Location and description are required here but not on the server: a listing nobody can
+ * collect from is not worth publishing.
+ */
+export const validateListing = (values) => {
+  const errors = {};
+
+  if (!values.name.trim()) errors.name = 'Product name is required';
+
+  if (!String(values.price).trim()) {
+    errors.price = 'Price is required';
+  } else if (!Number.isFinite(Number(values.price)) || Number(values.price) <= 0) {
+    errors.price = 'Enter a price greater than zero';
+  }
+
+  if (!values.category.trim()) errors.category = 'Choose a category';
+
+  if (!String(values.stock).trim()) {
+    errors.stock = 'How many are available';
+  } else if (!Number.isInteger(Number(values.stock)) || Number(values.stock) < 0) {
+    errors.stock = 'Enter zero or a whole number';
+  }
+
+  if (!values.description.trim()) errors.description = 'Description is required';
+
+  if (!parseLocation(values.location).city) errors.location = 'Location is required';
+
+  return errors;
+};

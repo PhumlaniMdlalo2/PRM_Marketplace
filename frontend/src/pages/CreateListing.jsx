@@ -1,41 +1,68 @@
-import { useState } from 'react';
-import { Upload, MapPin } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Store } from 'lucide-react';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
 import BackButton from '../components/ui/BackButton';
+import ListingEditor from '../components/listing/ListingEditor';
 import Layout from '../components/layout/Layout';
+import { useAsync } from '../hooks/useAsync';
+import { create } from '../api/products';
+import { getMyVendorProfile } from '../api/vendorProfile';
+import { useAuth } from '../auth/useAuth';
+import { emptyListingForm, toListingPayload, validateListing } from '../lib/listingForm';
 
+/**
+ * Publishes a new listing.
+ *
+ * The seller profile check is not decoration: the server resolves the listing's vendor from the token
+ * and rejects the create with a bodiless 400 when the account has no profile, which would otherwise
+ * surface as a form that refuses to submit for no stated reason.
+ */
 const CreateListing = () => {
-  const [formData, setFormData] = useState({
-    name: '',
-    price: '',
-    description: '',
-    location: '',
-    condition: 'New',
-  });
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [values, setValues] = useState(emptyListingForm);
   const [errors, setErrors] = useState({});
-  
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (errors[e.target.name]) setErrors({ ...errors, [e.target.name]: undefined });
+  const [submitError, setSubmitError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadSeller = useCallback(() => getMyVendorProfile(), []);
+  const { loading, error: sellerError } = useAsync(loadSeller);
+
+  const handleChange = (name, value) => {
+    setValues((current) => ({ ...current, [name]: value }));
+    setErrors((current) => (current[name] ? { ...current, [name]: undefined } : current));
   };
-  
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const next = {};
-    if (!formData.name.trim()) next.name = 'Product name is required';
-    if (!formData.price.trim()) next.price = 'Price is required';
-    else if (isNaN(Number(formData.price)) || Number(formData.price) <= 0) next.price = 'Enter a valid price';
-    if (!formData.description.trim()) next.description = 'Description is required';
-    if (!formData.location.trim()) next.location = 'Location is required';
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
-    // Handle create
-    console.log('Create listing:', formData);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const nextErrors = validateListing(values);
+    setErrors(nextErrors);
+    setSubmitError(null);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setSubmitting(true);
+    try {
+      const created = await create(toListingPayload(values));
+      navigate(`/product/${created.id}`, { replace: true });
+    } catch (error) {
+      // The seller profile was checked on mount, so a 400 here is a rule the server factory enforces
+      // and the client-side validation should already have caught. Kept as a fallback rather than
+      // trusting the two lists to stay identical forever.
+      setSubmitError(error.status === 400
+        ? 'The server rejected those details. Check the name, price, category and quantity.'
+        : error.message);
+      setSubmitting(false);
+    }
   };
-  
-  const conditions = ['New', 'Like New', 'Good', 'Fair'];
-  
+
+  // A seller profile is what a listing is published under, and only a VENDOR account may hold one.
+  // So there are two different reasons this form is unavailable, and they need different messages:
+  // a vendor who has not set a profile up yet can fix that in Settings, while any other role cannot
+  // open a storefront at all and should not be sent somewhere that will refuse to help.
+  const needsSellerProfile = sellerError?.status === 404 && user?.role === 'VENDOR';
+  const cannotSell = user?.role && user.role !== 'VENDOR';
+
   return (
     <Layout>
       <div className="app-container py-6 pb-24 max-w-2xl mx-auto">
@@ -43,96 +70,44 @@ const CreateListing = () => {
           <BackButton />
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Create listing</h1>
         </div>
-        
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-text-primary mb-2">
-            Product image
-          </label>
-          <div className="aspect-video bg-lavender rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-lavender-dark active:scale-[0.99] transition-all duration-200 border-2 border-dashed border-lavender-dark">
-            <span className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center mb-2 shadow-sm">
-              <Upload size={22} className="text-primary" />
-            </span>
-            <p className="text-sm font-medium text-text-secondary">Tap to upload an image</p>
-            <p className="text-xs text-text-muted mt-1">PNG, JPG up to 5MB</p>
+
+        {cannotSell ? (
+          <div className="rounded-2xl bg-lavender p-6 text-center">
+            <Store size={28} className="mx-auto mb-3 text-primary" aria-hidden="true" />
+            <h2 className="text-lg font-bold text-text-primary mb-1">Selling is for vendor accounts</h2>
+            <p className="text-sm text-text-secondary">
+              This account is signed in as {user.role.toLowerCase()}. Selling on the marketplace
+              needs a vendor account, so there is nothing to set up here.
+            </p>
           </div>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-          <Input
-            label="Product name"
-            name="name"
-            placeholder="Enter a descriptive title"
-            error={errors.name}
-            value={formData.name}
+        ) : needsSellerProfile ? (
+          <div className="rounded-2xl bg-lavender p-6 text-center">
+            <Store size={28} className="mx-auto mb-3 text-primary" aria-hidden="true" />
+            <h2 className="text-lg font-bold text-text-primary mb-1">Seller profile needed</h2>
+            <p className="text-sm text-text-secondary mb-4">
+              Items are published under a seller profile, so this account needs one before it can list
+              anything.
+            </p>
+            <Button onClick={() => navigate('/settings')}>Set up a seller profile</Button>
+          </div>
+        ) : loading ? (
+          // Nothing interactive until the profile answer arrives: an account without one cannot
+          // publish anything, and showing the form first would flash it at somebody who then gets
+          // told they cannot use it.
+          <div className="h-64 animate-pulse rounded-2xl bg-lavender" role="status">
+            <span className="sr-only">Checking seller profile</span>
+          </div>
+        ) : (
+          <ListingEditor
+            values={values}
+            errors={errors}
             onChange={handleChange}
+            onSubmit={handleSubmit}
+            submitting={submitting}
+            submitError={submitError}
+            submitLabel="Create listing"
           />
-          
-          <Input
-            label="Product price"
-            name="price"
-            type="number"
-            placeholder="Enter price in Rand"
-            error={errors.price}
-            value={formData.price}
-            onChange={handleChange}
-          />
-          
-          <div className="w-full">
-            <label className="block text-sm font-medium text-text-primary mb-1.5">
-              Product description
-            </label>
-            <textarea
-              name="description"
-              rows={4}
-              placeholder="Describe condition, dimensions, and any notes for buyers"
-              value={formData.description}
-              onChange={handleChange}
-              className={`w-full px-4 py-3 bg-white border ${errors.description ? 'border-error' : 'border-border'} rounded-xl text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 resize-none`}
-            />
-            {errors.description && (
-              <p className="mt-1 text-sm text-error">• {errors.description}</p>
-            )}
-          </div>
-          
-          <Input
-            label="Location"
-            name="location"
-            placeholder="Enter pickup location"
-            icon={MapPin}
-            error={errors.location}
-            value={formData.location}
-            onChange={handleChange}
-          />
-          
-          <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
-              Condition
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {conditions.map((condition) => (
-                <button
-                  key={condition}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, condition })}
-                  aria-pressed={formData.condition === condition}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 active:scale-95 ${
-                    formData.condition === condition
-                      ? 'bg-primary text-white shadow-md shadow-primary/20'
-                      : 'bg-white border border-border text-text-primary hover:bg-lavender'
-                  }`}
-                >
-                  {condition}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          <div className="pt-4">
-            <Button type="submit" size="lg">
-              Create listing
-            </Button>
-          </div>
-        </form>
+        )}
       </div>
     </Layout>
   );

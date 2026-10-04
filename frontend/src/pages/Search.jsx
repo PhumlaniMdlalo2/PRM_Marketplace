@@ -10,6 +10,8 @@ import Layout from '../components/layout/Layout';
 import { search } from '../api/products';
 import { toCardProps } from '../lib/format';
 import { useAsync } from '../hooks/useAsync';
+import { useFavourites } from '../hooks/useFavourites';
+import { useAuth } from '../auth/useAuth';
 
 const PAGE_SIZE = 24;
 
@@ -30,6 +32,7 @@ const MAX_PRICE = 10000;
 
 const Search = () => {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   // Filters live in the URL so a search can be linked and survives a refresh. The keyword is seeded
   // from ?q=, which is how Home's search bar hands off to this page.
   const [params, setParams] = useSearchParams();
@@ -76,6 +79,19 @@ const Search = () => {
   const { data, loading, error } = useAsync(loadResults);
 
   const results = (data?.content ?? []).map(toCardProps);
+  const favourites = useFavourites();
+
+  // A failed save must not take the results with it: the grid stays, and the message says what went
+  // wrong with the heart rather than pretending the search failed.
+  const onFavouriteToggle = async (productId) => {
+    if (!isAuthenticated) {
+      // Saved items belong to an account. Sending an anonymous visitor to sign in keeps the promise
+      // the heart makes instead of quietly accepting a tap that will not be there later.
+      navigate('/login', { state: { from: { pathname: `/search${window.location.search}` } } });
+      return;
+    }
+    await favourites.toggle(productId);
+  };
 
   return (
     <Layout>
@@ -192,11 +208,18 @@ const Search = () => {
             />
           ) : (
             <>
+              {favourites.error && (
+                <p role="alert" className="mb-4 text-sm text-error">
+                  {favourites.error}
+                </p>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
                 {results.map((product) => (
                   <ProductCard
                     key={product.id}
                     {...product}
+                    isFavourite={favourites.isFavourite(product.id)}
+                    onFavouriteToggle={() => onFavouriteToggle(product.id)}
                     onClick={() => navigate(`/product/${product.id}`)}
                   />
                 ))}

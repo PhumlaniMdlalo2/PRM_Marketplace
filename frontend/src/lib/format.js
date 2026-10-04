@@ -1,9 +1,9 @@
 /**
  * Presentation helpers for turning API payloads into the strings the UI shows.
  *
- * These live in one place because the same three values — price, location, condition — appear on
- * the home grid, the search results and the product page, and formatting them differently in each
- * is how "R1 450" on one screen and "1450" on another happens.
+ * These live in one place because the same three values - price, location, condition - appear on the
+ * home grid, the search results and the product page, and formatting them differently in each is how
+ * "R1 450" on one screen and "1450" on another happens.
  */
 
 // en-ZA with ZAR is deliberate: the catalogue is priced in rand, and the default locale of the
@@ -44,8 +44,8 @@ export const toCardProps = (product) => ({
   name: product.name ?? 'Untitled listing',
   price: formatPrice(product.price),
   location: formatLocation(product) || 'Location not set',
-  // The server sends an empty string rather than null for a listing with no image, and `??` only
-  // catches null/undefined — so an empty src would reach the <img> and render as a broken image
+// The server sends an empty string rather than null for a listing with no image, and `??` only
+  // catches null/undefined - so an empty src would reach the <img> and render as a broken image
   // instead of the placeholder tile.
   image: product.imageUrl || null,
 });

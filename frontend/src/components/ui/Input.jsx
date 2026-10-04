@@ -1,5 +1,5 @@
 import { forwardRef, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 const Input = forwardRef(({ 
   label, 
@@ -60,9 +60,9 @@ const Input = forwardRef(({
       {hint && !error && (
         <p className="mt-1 text-xs text-text-muted">{hint}</p>
       )}
-      {error && (
+{error && (
         <p className="mt-1 text-sm text-error flex items-center gap-1">
-          <span aria-hidden="true">•</span> {error}
+          <AlertCircle size={14} aria-hidden="true" /> {error}
         </p>
       )}
     </div>
