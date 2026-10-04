@@ -1,23 +1,43 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Mail, Globe } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import { useAuth } from '../auth/useAuth';
 
 const Login = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { signIn, isAuthenticated } = useAuth();
   const [formData, setFormData] = useState({
-    email: '',
+    // Verification sends the address back here after a successful code check, so the user is not
+    // asked to retype the email they just confirmed.
+    email: location.state?.email ?? '',
     password: '',
-    rememberMe: false,
+    // Ticked by default, and this is the load-bearing part of the token storage decision: the
+    // token goes to localStorage and survives a browser restart. Unticking it moves the token to
+    // sessionStorage so the session ends with the tab. Un-ticked-by-default would have quietly
+    // made every ordinary sign-in session-scoped.
+    rememberMe: true,
   });
   const [errors, setErrors] = useState({});
-  
+  const [formError, setFormError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Someone already signed in has no business on this page. This has to be an effect: navigating
+  // during render is not allowed, and returning early would render the redirect page instead of
+  // this one for a frame.
+  useEffect(() => {
+    if (isAuthenticated) navigate('/', { replace: true });
+  }, [isAuthenticated, navigate]);
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value });
     if (errors[name]) setErrors({ ...errors, [name]: undefined });
+    if (formError) setFormError(null);
   };
-  
+
   const validate = () => {
     const next = {};
     if (!formData.email.trim()) next.email = 'Email is required';
@@ -26,14 +46,26 @@ const Login = () => {
     else if (formData.password.length < 6) next.password = 'Password must be at least 6 characters';
     return next;
   };
-  
-  const handleSubmit = (e) => {
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const validationErrors = validate();
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
-    // Handle login
-    console.log('Login:', formData);
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await signIn(formData.email.trim(), formData.password, { persistent: formData.rememberMe });
+      navigate('/', { replace: true });
+    } catch (caught) {
+      // The backend answers a wrong email and a wrong password identically on purpose, so there
+      // is no way to tell the user which one was wrong without helping whoever is guessing.
+      setFormError(caught.message);
+      if (caught.fieldErrors) setErrors(caught.fieldErrors);
+    } finally {
+      setSubmitting(false);
+    }
   };
   
   return (
@@ -48,6 +80,15 @@ const Login = () => {
       </div>
       
       <form onSubmit={handleSubmit} className="mt-8 space-y-4" noValidate>
+        {formError && (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {formError}
+          </div>
+        )}
+
         <Input
           label="Email"
           type="email"
@@ -88,8 +129,8 @@ const Login = () => {
         </div>
         
         <div className="pt-4">
-          <Button type="submit" size="lg">
-            Log in
+          <Button type="submit" size="lg" disabled={submitting}>
+            {submitting ? 'Logging in…' : 'Log in'}
           </Button>
         </div>
       </form>
