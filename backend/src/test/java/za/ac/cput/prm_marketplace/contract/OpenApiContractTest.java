@@ -52,9 +52,11 @@ class OpenApiContractTest {
      * resources are migrated. Naming them here makes their removal a deliberate, visible change
      * rather than a silent one: adding a new unprefixed route fails this test.
      *
-     * <p>{@code /payments} left this list in Batch E, and {@code /vendor-profiles} in Batch D.
+     * <p>{@code /payments} left this list in Batch E, {@code /vendor-profiles} in Batch D, and
+     * {@code /users} when the account routes moved to {@code /api/users} and the entity-taking
+     * writes were dropped. Empty now, so this list stays as the tripwire it was written to be.
      */
-    private static final List<String> KNOWN_LEGACY_PREFIXES = List.of("/users");
+    private static final List<String> KNOWN_LEGACY_PREFIXES = List.of();
 
     /**
      * Ownership-taking routes that are known to be vulnerable and not yet fixed. Each one is a

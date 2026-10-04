@@ -37,26 +37,6 @@ class UserServiceImplTest {
     }
 
     @Test
-    void createReturnsNullWhenUserIsNull() {
-        User result = userService.create(null);
-
-        assertThat(result).isNull();
-        verifyNoInteractions(userRepository);
-    }
-
-    @Test
-    void createSavesAndReturnsUser() {
-        User user = buildUser(null);
-        User saved = buildUser(UUID.randomUUID());
-        when(userRepository.save(user)).thenReturn(saved);
-
-        User result = userService.create(user);
-
-        assertThat(result).isEqualTo(saved);
-        verify(userRepository).save(user);
-    }
-
-    @Test
     void readReturnsNullWhenIdIsNull() {
         User result = userService.read(null);
 
@@ -86,46 +66,84 @@ class UserServiceImplTest {
     }
 
     @Test
-    void updateReturnsNullWhenUserIsNull() {
-        User result = userService.update(null);
+    void updateProfileReturnsNullWhenIdIsNull() {
+        User result = userService.updateProfile(null, "Jane Doe", null, null);
 
         assertThat(result).isNull();
         verifyNoInteractions(userRepository);
     }
 
     @Test
-    void updateReturnsNullWhenIdIsNull() {
-        User user = buildUser(null);
-
-        User result = userService.update(user);
-
-        assertThat(result).isNull();
-        verifyNoInteractions(userRepository);
-    }
-
-    @Test
-    void updateReturnsNullWhenUserDoesNotExist() {
+    void updateProfileReturnsNullWhenAccountDoesNotExist() {
         UUID id = UUID.randomUUID();
-        User user = buildUser(id);
-        when(userRepository.existsById(id)).thenReturn(false);
+        when(userRepository.findById(id)).thenReturn(Optional.empty());
 
-        User result = userService.update(user);
+        User result = userService.updateProfile(id, "Jane Doe", null, null);
 
         assertThat(result).isNull();
         verify(userRepository, never()).save(any());
     }
 
     @Test
-    void updateSavesAndReturnsUserWhenExists() {
+    void updateProfileSavesTheThreeEditableFields() {
         UUID id = UUID.randomUUID();
-        User user = buildUser(id);
-        when(userRepository.existsById(id)).thenReturn(true);
-        when(userRepository.save(user)).thenReturn(user);
+        User existing = buildUser(id);
+        when(userRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userService.update(user);
+        User result = userService.updateProfile(id, "Jane Roe", "0722222222", "https://cdn/a.png");
 
-        assertThat(result).isEqualTo(user);
-        verify(userRepository).save(user);
+        assertThat(result).isNotNull();
+        assertThat(result.getName()).isEqualTo("Jane Roe");
+        assertThat(result.getPhone()).isEqualTo("0722222222");
+        assertThat(result.getAvatarUrl()).isEqualTo("https://cdn/a.png");
+        assertThat(result.getId()).isEqualTo(id);
+    }
+
+    /**
+     * The properties that make an account an account — its role, its credential, whether it is
+     * verified — are not arguments to this method, so they cannot be changed by it. This is the
+     * assertion that replaces the old entity update.
+     */
+    @Test
+    void updateProfileLeavesRoleCredentialAndVerificationUntouched() {
+        UUID id = UUID.randomUUID();
+        User existing = new User.Builder()
+                .setId(id)
+                .setName("Jane Doe")
+                .setEmail("jane@example.com")
+                .setPasswordHash("original-hash")
+                .setRole(Role.VENDOR)
+                .setVerified(true)
+                .setCreatedAt(java.time.LocalDateTime.of(2024, 1, 1, 0, 0))
+                .build();
+        when(userRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.updateProfile(id, "Renamed", null, null);
+
+        assertThat(result.getRole()).isEqualTo(Role.VENDOR);
+        assertThat(result.getPasswordHash()).isEqualTo("original-hash");
+        assertThat(result.getEmail()).isEqualTo("jane@example.com");
+        assertThat(result.isVerified()).isTrue();
+        assertThat(result.getCreatedAt()).isEqualTo(java.time.LocalDateTime.of(2024, 1, 1, 0, 0));
+    }
+
+    @Test
+    void updateProfileClearsOptionalFieldsWhenGivenNull() {
+        UUID id = UUID.randomUUID();
+        User existing = new User.Builder()
+                .setId(id).setName("Jane").setEmail("jane@example.com")
+                .setPasswordHash("hash").setRole(Role.STUDENT)
+                .setPhone("0710000000").setAvatarUrl("https://cdn/a.png")
+                .build();
+        when(userRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.updateProfile(id, "Jane", null, null);
+
+        assertThat(result.getPhone()).isNull();
+        assertThat(result.getAvatarUrl()).isNull();
     }
 
     @Test

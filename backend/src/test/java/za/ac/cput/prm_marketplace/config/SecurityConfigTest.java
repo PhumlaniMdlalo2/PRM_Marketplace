@@ -60,14 +60,14 @@ class SecurityConfigTest {
     @Test
     @DisplayName("protected routes reject anonymous callers with 401")
     void protectedRoutes_rejectAnonymous() throws Exception {
-        mockMvc.perform(get("/users"))
+        mockMvc.perform(get("/api/users/me"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     @DisplayName("protected write routes reject anonymous callers with 401")
     void protectedWriteRoutes_rejectAnonymous() throws Exception {
-        mockMvc.perform(post("/users")
+        mockMvc.perform(put("/api/users/me")
                         .contentType("application/json")
                         .content("{}"))
                 .andExpect(status().isUnauthorized());
@@ -131,8 +131,9 @@ class SecurityConfigTest {
     void validToken_grantsAccess() throws Exception {
         User user = buildUser(UUID.randomUUID());
         when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
 
-        mockMvc.perform(get("/users").with(SecurityMockMvcRequestPostProcessors.csrf())
+        mockMvc.perform(get("/api/users/me").with(SecurityMockMvcRequestPostProcessors.csrf())
                         .header("Authorization", tokenFor(user)))
                 .andExpect(status().isOk());
     }
@@ -140,7 +141,7 @@ class SecurityConfigTest {
     @Test
     @DisplayName("a malformed bearer token is rejected rather than authenticated")
     void malformedToken_isRejected() throws Exception {
-        mockMvc.perform(get("/users").header("Authorization", "Bearer not-a-jwt"))
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer not-a-jwt"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -150,14 +151,14 @@ class SecurityConfigTest {
         String foreign = "Bearer " + new JwtService("a-completely-different-signing-secret-value-x", 3_600_000L)
                 .generateToken(buildUser(UUID.randomUUID()));
 
-        mockMvc.perform(get("/users").header("Authorization", foreign))
+        mockMvc.perform(get("/api/users/me").header("Authorization", foreign))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     @DisplayName("CORS preflight for an allowed origin is accepted")
     void corsPreflight_allowedOrigin_isAccepted() throws Exception {
-        mockMvc.perform(options("/users")
+        mockMvc.perform(options("/api/users/me")
                         .header("Origin", "http://localhost:5173")
                         .header("Access-Control-Request-Method", "GET"))
                 .andExpect(status().isOk())
@@ -168,7 +169,7 @@ class SecurityConfigTest {
     @Test
     @DisplayName("CORS preflight for an unknown origin is rejected")
     void corsPreflight_unknownOrigin_isRejected() throws Exception {
-        mockMvc.perform(options("/users")
+        mockMvc.perform(options("/api/users/me")
                         .header("Origin", "http://evil.example.com")
                         .header("Access-Control-Request-Method", "GET"))
                 .andExpect(status().isForbidden());

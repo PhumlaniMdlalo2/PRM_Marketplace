@@ -16,79 +16,6 @@
     "bearerAuth" : [ ]
   } ],
   "paths" : {
-    "/users" : {
-      "get" : {
-        "tags" : [ "user-controller" ],
-        "operationId" : "getAll",
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "type" : "array",
-                  "items" : {
-                    "$ref" : "#/components/schemas/UserResponse"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "put" : {
-        "tags" : [ "user-controller" ],
-        "operationId" : "update",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/User"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post" : {
-        "tags" : [ "user-controller" ],
-        "operationId" : "create",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/User"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/vendor-profiles/{id}" : {
       "get" : {
         "tags" : [ "vendor-profile-controller" ],
@@ -117,7 +44,7 @@
       },
       "put" : {
         "tags" : [ "vendor-profile-controller" ],
-        "operationId" : "update_1",
+        "operationId" : "update",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -151,10 +78,54 @@
         }
       }
     },
+    "/api/users/me" : {
+      "get" : {
+        "tags" : [ "user-controller" ],
+        "operationId" : "me",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "user-controller" ],
+        "operationId" : "updateMe",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/reviews" : {
       "get" : {
         "tags" : [ "review-controller" ],
-        "operationId" : "getAll_1",
+        "operationId" : "getAll",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -173,7 +144,7 @@
       },
       "put" : {
         "tags" : [ "review-controller" ],
-        "operationId" : "update_2",
+        "operationId" : "update_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -199,7 +170,7 @@
       },
       "post" : {
         "tags" : [ "review-controller" ],
-        "operationId" : "create_1",
+        "operationId" : "create",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -252,7 +223,7 @@
       },
       "put" : {
         "tags" : [ "product-controller" ],
-        "operationId" : "update_3",
+        "operationId" : "update_2",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -314,7 +285,7 @@
       },
       "put" : {
         "tags" : [ "product-image-controller" ],
-        "operationId" : "update_4",
+        "operationId" : "update_3",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -394,7 +365,7 @@
       },
       "put" : {
         "tags" : [ "payment-controller" ],
-        "operationId" : "update_5",
+        "operationId" : "update_4",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -456,7 +427,7 @@
       },
       "put" : {
         "tags" : [ "order-controller" ],
-        "operationId" : "update_6",
+        "operationId" : "update_5",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -536,7 +507,7 @@
       },
       "put" : {
         "tags" : [ "comment-controller" ],
-        "operationId" : "update_7",
+        "operationId" : "update_6",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -651,7 +622,7 @@
       },
       "put" : {
         "tags" : [ "bulletin-post-controller" ],
-        "operationId" : "update_8",
+        "operationId" : "update_7",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -731,7 +702,7 @@
       },
       "put" : {
         "tags" : [ "address-controller" ],
-        "operationId" : "update_9",
+        "operationId" : "update_8",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -786,7 +757,7 @@
     "/api/vendor-profiles" : {
       "get" : {
         "tags" : [ "vendor-profile-controller" ],
-        "operationId" : "getAll_2",
+        "operationId" : "getAll_1",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -805,7 +776,7 @@
       },
       "post" : {
         "tags" : [ "vendor-profile-controller" ],
-        "operationId" : "create_2",
+        "operationId" : "create_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -860,7 +831,7 @@
     "/api/reports" : {
       "get" : {
         "tags" : [ "report-controller" ],
-        "operationId" : "getAll_3",
+        "operationId" : "getAll_2",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -879,7 +850,7 @@
       },
       "post" : {
         "tags" : [ "report-controller" ],
-        "operationId" : "create_3",
+        "operationId" : "create_2",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -907,7 +878,7 @@
     "/api/products" : {
       "get" : {
         "tags" : [ "product-controller" ],
-        "operationId" : "getAll_4",
+        "operationId" : "getAll_3",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -926,7 +897,7 @@
       },
       "post" : {
         "tags" : [ "product-controller" ],
-        "operationId" : "create_4",
+        "operationId" : "create_3",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -982,7 +953,7 @@
       },
       "post" : {
         "tags" : [ "product-image-controller" ],
-        "operationId" : "create_5",
+        "operationId" : "create_4",
         "parameters" : [ {
           "name" : "productId",
           "in" : "path",
@@ -1064,7 +1035,7 @@
     "/api/payments" : {
       "get" : {
         "tags" : [ "payment-controller" ],
-        "operationId" : "getAll_5",
+        "operationId" : "getAll_4",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1083,7 +1054,7 @@
       },
       "post" : {
         "tags" : [ "payment-controller" ],
-        "operationId" : "create_6",
+        "operationId" : "create_5",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1111,7 +1082,7 @@
     "/api/orders" : {
       "get" : {
         "tags" : [ "order-controller" ],
-        "operationId" : "getAll_6",
+        "operationId" : "getAll_5",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1130,7 +1101,7 @@
       },
       "post" : {
         "tags" : [ "order-controller" ],
-        "operationId" : "create_7",
+        "operationId" : "create_6",
         "parameters" : [ {
           "name" : "shippingAddressId",
           "in" : "query",
@@ -1253,7 +1224,7 @@
     "/api/comments" : {
       "post" : {
         "tags" : [ "comment-controller" ],
-        "operationId" : "create_8",
+        "operationId" : "create_7",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1281,7 +1252,7 @@
     "/api/cart-items" : {
       "get" : {
         "tags" : [ "cart-item-controller" ],
-        "operationId" : "getAll_7",
+        "operationId" : "getAll_6",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1344,7 +1315,7 @@
     "/api/bulletin-posts" : {
       "get" : {
         "tags" : [ "bulletin-post-controller" ],
-        "operationId" : "getAll_8",
+        "operationId" : "getAll_7",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1363,7 +1334,7 @@
       },
       "post" : {
         "tags" : [ "bulletin-post-controller" ],
-        "operationId" : "create_9",
+        "operationId" : "create_8",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1608,7 +1579,7 @@
     "/api/addresses" : {
       "get" : {
         "tags" : [ "address-controller" ],
-        "operationId" : "getAll_9",
+        "operationId" : "getAll_8",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1627,7 +1598,7 @@
       },
       "post" : {
         "tags" : [ "address-controller" ],
-        "operationId" : "create_10",
+        "operationId" : "create_9",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1888,7 +1859,46 @@
         }
       }
     },
-    "/users/{id}" : {
+    "/api/vendor-profiles/me" : {
+      "get" : {
+        "tags" : [ "vendor-profile-controller" ],
+        "operationId" : "findMine",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendorProfile"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users" : {
+      "get" : {
+        "tags" : [ "user-controller" ],
+        "operationId" : "getAll_9",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/UserResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}" : {
       "get" : {
         "tags" : [ "user-controller" ],
         "operationId" : "read_8",
@@ -1933,7 +1943,7 @@
         }
       }
     },
-    "/users/email/{email}" : {
+    "/api/users/email/{email}" : {
       "get" : {
         "tags" : [ "user-controller" ],
         "operationId" : "findByEmail",
@@ -1952,24 +1962,6 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/vendor-profiles/me" : {
-      "get" : {
-        "tags" : [ "vendor-profile-controller" ],
-        "operationId" : "findMine",
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/VendorProfile"
                 }
               }
             }
@@ -3253,40 +3245,56 @@
   },
   "components" : {
     "schemas" : {
-      "User" : {
+      "VendorProfile" : {
         "type" : "object",
         "properties" : {
           "id" : {
             "type" : "string",
-            "format" : "uuid"
-          },
-          "name" : {
-            "type" : "string"
-          },
-          "email" : {
-            "type" : "string"
-          },
-          "role" : {
-            "type" : "string",
-            "enum" : [ "STUDENT", "FACULTY", "VENDOR", "RESIDENT" ],
+            "format" : "uuid",
             "readOnly" : true
           },
-          "phone" : {
+          "businessName" : {
             "type" : "string"
           },
-          "createdAt" : {
-            "type" : "string",
-            "format" : "date-time",
-            "readOnly" : true
+          "registrationNo" : {
+            "type" : "string"
           },
           "verified" : {
             "type" : "boolean",
             "readOnly" : true
           },
-          "avatarUrl" : {
-            "type" : "string"
+          "ratingAvg" : {
+            "type" : "number",
+            "readOnly" : true
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time",
+            "readOnly" : true
           }
         }
+      },
+      "UpdateProfileRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
+          },
+          "phone" : {
+            "type" : "string",
+            "maxLength" : 32,
+            "minLength" : 0
+          },
+          "avatarUrl" : {
+            "type" : "string",
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "pattern" : "^$|https?://.+"
+          }
+        },
+        "required" : [ "name" ]
       },
       "UserResponse" : {
         "type" : "object",
@@ -3317,35 +3325,6 @@
           "createdAt" : {
             "type" : "string",
             "format" : "date-time"
-          }
-        }
-      },
-      "VendorProfile" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string",
-            "format" : "uuid",
-            "readOnly" : true
-          },
-          "businessName" : {
-            "type" : "string"
-          },
-          "registrationNo" : {
-            "type" : "string"
-          },
-          "verified" : {
-            "type" : "boolean",
-            "readOnly" : true
-          },
-          "ratingAvg" : {
-            "type" : "number",
-            "readOnly" : true
-          },
-          "createdAt" : {
-            "type" : "string",
-            "format" : "date-time",
-            "readOnly" : true
           }
         }
       },
@@ -3575,6 +3554,41 @@
             "type" : "string",
             "format" : "date-time",
             "readOnly" : true
+          }
+        }
+      },
+      "User" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "STUDENT", "FACULTY", "VENDOR", "RESIDENT" ],
+            "readOnly" : true
+          },
+          "phone" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time",
+            "readOnly" : true
+          },
+          "verified" : {
+            "type" : "boolean",
+            "readOnly" : true
+          },
+          "avatarUrl" : {
+            "type" : "string"
           }
         }
       },
