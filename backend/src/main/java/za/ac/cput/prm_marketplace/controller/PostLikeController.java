@@ -11,6 +11,8 @@ import za.ac.cput.prm_marketplace.service.IPostLikeService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 @RestController
 @RequestMapping("/api/post-likes")
@@ -29,6 +31,10 @@ public class PostLikeController {
      * naming whoever they liked as.
      */
     @PostMapping("/post/{postId}/toggle")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "The like was created and the full row is returned."),
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<PostLike> toggle(@PathVariable UUID postId, Authentication authentication) {
         PostLike result = postLikeService.toggle(postId, CurrentCaller.id(authentication));
         // A null result means the caller's like was removed, which is a 204 rather than an error.

@@ -261,15 +261,82 @@ class ProductServiceImplTest {
     }
 
     @Test
-    @DisplayName("update is how a seller retires a listing")
-    void update_retiresTheListing() {
+    @DisplayName("update ignores an active flag in the body, so an edit cannot retire a listing")
+    void update_doesNotRetireTheListing() {
         when(productRepository.findByIdAndVendorUserId(id, sellerId))
                 .thenReturn(Optional.of(ownedLaptop));
         when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
-        Product retired = Product.builder().copy(ownedLaptop).active(false).build();
+        Product askingToRetire = Product.builder().copy(ownedLaptop).active(false).build();
 
-        assertFalse(productService.update(id, retired, sellerId).isActive());
+        assertTrue(productService.update(id, askingToRetire, sellerId).isActive());
+    }
+
+    /**
+     * The body that actually happens in practice: a form sending name, price and stock, with no
+     * active flag anywhere in it. That is exactly the request that used to take the listing down.
+     */
+    @Test
+    @DisplayName("an update body with no active field keeps the listing on sale")
+    void update_withoutAnActiveFieldKeepsTheListingLive() {
+        when(productRepository.findByIdAndVendorUserId(id, sellerId))
+                .thenReturn(Optional.of(ownedLaptop));
+        when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
+
+        Product ordinaryEdit = Product.builder()
+                .name("Laptop, updated price")
+                .price(new BigDecimal("1500.00"))
+                .stockQuantity(2)
+                .build();
+
+        assertTrue(productService.update(id, ordinaryEdit, sellerId).isActive());
+    }
+
+    // retire / reactivate
+
+    @Test
+    @DisplayName("retire takes the caller's own listing off sale")
+    void retire_takesTheListingDown() {
+        when(productRepository.findByIdAndVendorUserId(id, sellerId))
+                .thenReturn(Optional.of(ownedLaptop));
+        when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
+        ArgumentCaptor<Product> saved = ArgumentCaptor.forClass(Product.class);
+
+        assertTrue(productService.retire(id, sellerId));
+
+        verify(productRepository).save(saved.capture());
+        assertFalse(saved.getValue().isActive());
+    }
+
+    @Test
+    @DisplayName("reactivate puts a retired listing back on sale")
+    void reactivate_bringsTheListingBack() {
+        Product retired = Product.builder().copy(ownedLaptop).active(false).build();
+        when(productRepository.findByIdAndVendorUserId(id, sellerId)).thenReturn(Optional.of(retired));
+        when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
+        ArgumentCaptor<Product> saved = ArgumentCaptor.forClass(Product.class);
+
+        assertTrue(productService.reactivate(id, sellerId));
+
+        verify(productRepository).save(saved.capture());
+        assertTrue(saved.getValue().isActive());
+    }
+
+    @Test
+    @DisplayName("retiring somebody else's listing is reported as not found and saves nothing")
+    void retire_rejectsAnotherSellersListing() {
+        when(productRepository.findByIdAndVendorUserId(id, sellerId)).thenReturn(Optional.empty());
+
+        assertFalse(productService.retire(id, sellerId));
+        assertFalse(productService.reactivate(id, sellerId));
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("retire with null arguments returns false instead of throwing")
+    void retire_nullArguments_returnFalse() {
+        assertFalse(productService.retire(null, sellerId));
+        assertFalse(productService.retire(id, null));
     }
 
     @Test
@@ -305,19 +372,21 @@ class ProductServiceImplTest {
     // getAll
 
     @Test
-    void getAll_returnsEveryProduct() {
-        when(productRepository.findAll()).thenReturn(List.of(laptop, phone));
+    @DisplayName("getAll returns live listings only, so a retired item leaves the browse grid")
+    void getAll_returnsLiveProductsOnly() {
+        when(productRepository.findByActiveTrue()).thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getAll();
 
         assertEquals(2, result.size());
         assertTrue(result.contains(laptop));
         assertTrue(result.contains(phone));
+        verify(productRepository, never()).findAll();
     }
 
     @Test
     void getAll_noProducts_returnsEmptyList() {
-        when(productRepository.findAll()).thenReturn(List.of());
+        when(productRepository.findByActiveTrue()).thenReturn(List.of());
 
         assertTrue(productService.getAll().isEmpty());
     }
@@ -325,13 +394,15 @@ class ProductServiceImplTest {
     // getByVendor / getByCategory
 
     @Test
+    @DisplayName("getByVendor returns live listings only")
     void getByVendor_returnsVendorsProducts() {
-        when(productRepository.findByVendorId(vendorId)).thenReturn(List.of(laptop, phone));
+        when(productRepository.findByVendorIdAndActiveTrue(vendorId)).thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getByVendor(vendorId);
 
         assertEquals(2, result.size());
-        verify(productRepository).findByVendorId(vendorId);
+        verify(productRepository).findByVendorIdAndActiveTrue(vendorId);
+        verify(productRepository, never()).findByVendorId(vendorId);
     }
 
     @Test
@@ -341,13 +412,15 @@ class ProductServiceImplTest {
     }
 
     @Test
+    @DisplayName("getByCategory returns live listings only")
     void getByCategory_returnsMatchingProducts() {
-        when(productRepository.findByCategory("Electronics")).thenReturn(List.of(laptop, phone));
+        when(productRepository.findByActiveTrueAndCategory("Electronics")).thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getByCategory("Electronics");
 
         assertEquals(2, result.size());
-        verify(productRepository).findByCategory("Electronics");
+        verify(productRepository).findByActiveTrueAndCategory("Electronics");
+        verify(productRepository, never()).findByCategory("Electronics");
     }
 
     @Test

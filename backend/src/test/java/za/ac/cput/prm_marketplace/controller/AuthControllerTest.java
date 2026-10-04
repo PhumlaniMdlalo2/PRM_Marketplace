@@ -211,32 +211,71 @@ class AuthControllerTest {
         doNothing().when(authService).changePassword(any(), anyString(), anyString());
 
         mockMvc.perform(post("/api/auth/change-password")
-                        .param("currentPassword", "old")
-                        .param("newPassword", "brandNew123")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"old","newPassword":"brandNew123"}""")
                         .with(as(callerId)))
                 .andExpect(status().isOk());
 
-        // The account came off the token. An email parameter would have let any authenticated
+        // The account came off the token. An email field would have let any authenticated
         // caller point this at a different account.
         verify(authService).changePassword(callerId, "old", "brandNew123");
     }
 
     @Test
-    @DisplayName("changePassword: an email parameter is ignored, not honoured")
+    @DisplayName("changePassword: an email in the body is ignored, not honoured")
     void changePassword_ignoresSuppliedEmail() throws Exception {
         UUID callerId = UUID.randomUUID();
         UUID victimId = UUID.randomUUID();
         doNothing().when(authService).changePassword(any(), anyString(), anyString());
 
         mockMvc.perform(post("/api/auth/change-password")
-                        .param("email", "victim@example.com")
-                        .param("currentPassword", "old")
-                        .param("newPassword", "brandNew123")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"victim@example.com","currentPassword":"old",\
+                                "newPassword":"brandNew123"}""")
                         .with(as(callerId)))
                 .andExpect(status().isOk());
 
         verify(authService).changePassword(callerId, "old", "brandNew123");
         verify(authService, never()).changePassword(eq(victimId), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("changePassword: the new password travels in the body, never in the URL")
+    void changePassword_keepsPasswordOutOfTheRequestLine() throws Exception {
+        UUID callerId = UUID.randomUUID();
+        doNothing().when(authService).changePassword(any(), anyString(), anyString());
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .param("currentPassword", "old")
+                        .param("newPassword", "brandNew123")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"old","newPassword":"brandNew123"}""")
+                        .with(as(callerId)))
+                .andExpect(status().isOk());
+
+        // The body alone is enough to satisfy the route. If either password were still being read
+        // from a parameter, this would fail with 400 instead: the params are ignored, and nothing in
+        // the URL is left for them to be read from.
+    }
+
+    @Test
+    @DisplayName("changePassword: a new password below the minimum length is rejected")
+    void changePassword_rejectsShortNewPassword() throws Exception {
+        UUID callerId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"old","newPassword":"short"}""")
+                        .with(as(callerId)))
+                .andExpect(status().isBadRequest());
+
+        // Rejected before the service is reached, so a caller cannot set a password that registration
+        // would have refused.
+        verify(authService, never()).changePassword(any(), anyString(), anyString());
     }
 
     /** Authenticates the request as the given account. */

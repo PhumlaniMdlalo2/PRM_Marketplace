@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.dto.AuthResponse;
+import za.ac.cput.prm_marketplace.dto.ChangePasswordRequest;
 import za.ac.cput.prm_marketplace.dto.ForgotPasswordRequest;
 import za.ac.cput.prm_marketplace.dto.LoginRequest;
 import za.ac.cput.prm_marketplace.dto.RegisterRequest;
@@ -79,12 +80,18 @@ public class AuthController {
      * authenticated caller could aim the request at another user's login, and the differing error
      * messages for an unknown address versus a wrong password turned the endpoint into an account
      * enumeration oracle. The account now comes from the token via {@link CurrentCaller}.
+     *
+     * <p>The two passwords arrive in a request body, not as request parameters. They were parameters
+     * once, which put the new password in the request line and therefore in every access log, proxy
+     * log and browser history entry on the path to this server. Neither field has any business in a
+     * URL: the request line is for naming resources, not carrying secrets. Validation lives on the
+     * DTO, so the minimum length rule is enforced here rather than only inside the service.
      */
     @PostMapping("/change-password")
     public ResponseEntity<Map<String, String>> changePassword(Authentication authentication,
-                                                              @RequestParam String currentPassword,
-                                                              @RequestParam String newPassword) {
-        authService.changePassword(CurrentCaller.id(authentication), currentPassword, newPassword);
+                                                              @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(CurrentCaller.id(authentication),
+                request.currentPassword(), request.newPassword());
         return ResponseEntity.ok(Map.of("message", "Password updated"));
     }
 }

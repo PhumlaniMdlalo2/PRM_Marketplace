@@ -331,8 +331,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -473,8 +473,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -553,8 +553,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -668,8 +668,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -748,8 +748,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -816,7 +816,17 @@
         } ],
         "responses" : {
           "200" : {
-            "description" : "OK",
+            "description" : "The resource is now saved and the full row is returned.",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SavedItem"
+                }
+              }
+            }
+          },
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read.",
             "content" : {
               "*/*" : {
                 "schema" : {
@@ -922,6 +932,46 @@
         }
       }
     },
+    "/api/products/{id}/retire" : {
+      "post" : {
+        "tags" : [ "product-controller" ],
+        "operationId" : "retire",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
+          }
+        }
+      }
+    },
+    "/api/products/{id}/reactivate" : {
+      "post" : {
+        "tags" : [ "product-controller" ],
+        "operationId" : "reactivate",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
+          }
+        }
+      }
+    },
     "/api/product-images/product/{productId}" : {
       "get" : {
         "tags" : [ "product-image-controller" ],
@@ -999,8 +1049,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -1019,8 +1069,18 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK",
+          "201" : {
+            "description" : "The like was created and the full row is returned.",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PostLike"
+                }
+              }
+            }
+          },
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read.",
             "content" : {
               "*/*" : {
                 "schema" : {
@@ -1164,14 +1224,17 @@
             "type" : "string",
             "format" : "uuid"
           }
-        }, {
-          "name" : "body",
-          "in" : "query",
-          "required" : true,
-          "schema" : {
-            "type" : "string"
-          }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1306,8 +1369,8 @@
         "tags" : [ "cart-item-controller" ],
         "operationId" : "clearCart",
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -1544,21 +1607,16 @@
       "post" : {
         "tags" : [ "auth-controller" ],
         "operationId" : "changePassword",
-        "parameters" : [ {
-          "name" : "currentPassword",
-          "in" : "query",
-          "required" : true,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "name" : "newPassword",
-          "in" : "query",
-          "required" : true,
-          "schema" : {
-            "type" : "string"
-          }
-        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1749,8 +1807,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -1937,8 +1995,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -2029,8 +2087,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -2093,8 +2151,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -2198,8 +2256,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -2757,8 +2815,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -2948,8 +3006,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -3168,8 +3226,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -3236,8 +3294,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "Nothing to return: the change was applied and there is no state left to read."
           }
         }
       }
@@ -3270,6 +3328,11 @@
           "createdAt" : {
             "type" : "string",
             "format" : "date-time",
+            "readOnly" : true
+          },
+          "userId" : {
+            "type" : "string",
+            "format" : "uuid",
             "readOnly" : true
           }
         }
@@ -3522,6 +3585,20 @@
           }
         }
       },
+      "AuthorSummary" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "avatarUrl" : {
+            "type" : "string"
+          }
+        }
+      },
       "Order" : {
         "type" : "object",
         "properties" : {
@@ -3530,7 +3607,7 @@
             "format" : "uuid"
           },
           "buyer" : {
-            "$ref" : "#/components/schemas/User",
+            "$ref" : "#/components/schemas/AuthorSummary",
             "readOnly" : true
           },
           "status" : {
@@ -3554,55 +3631,6 @@
             "type" : "string",
             "format" : "date-time",
             "readOnly" : true
-          }
-        }
-      },
-      "User" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "name" : {
-            "type" : "string"
-          },
-          "email" : {
-            "type" : "string"
-          },
-          "role" : {
-            "type" : "string",
-            "enum" : [ "STUDENT", "FACULTY", "VENDOR", "RESIDENT" ],
-            "readOnly" : true
-          },
-          "phone" : {
-            "type" : "string"
-          },
-          "createdAt" : {
-            "type" : "string",
-            "format" : "date-time",
-            "readOnly" : true
-          },
-          "verified" : {
-            "type" : "boolean",
-            "readOnly" : true
-          },
-          "avatarUrl" : {
-            "type" : "string"
-          }
-        }
-      },
-      "AuthorSummary" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string"
-          },
-          "name" : {
-            "type" : "string"
-          },
-          "avatarUrl" : {
-            "type" : "string"
           }
         }
       },
@@ -3691,7 +3719,7 @@
             "format" : "uuid"
           },
           "user" : {
-            "$ref" : "#/components/schemas/User",
+            "$ref" : "#/components/schemas/AuthorSummary",
             "readOnly" : true
           },
           "product" : {
@@ -3716,7 +3744,7 @@
             "format" : "uuid"
           },
           "user" : {
-            "$ref" : "#/components/schemas/User",
+            "$ref" : "#/components/schemas/AuthorSummary",
             "readOnly" : true
           },
           "product" : {
@@ -3738,7 +3766,7 @@
             "readOnly" : true
           },
           "reporter" : {
-            "$ref" : "#/components/schemas/User",
+            "$ref" : "#/components/schemas/AuthorSummary",
             "readOnly" : true
           },
           "targetType" : {
@@ -3799,6 +3827,17 @@
           }
         }
       },
+      "SendMessageRequest" : {
+        "type" : "object",
+        "properties" : {
+          "body" : {
+            "type" : "string",
+            "maxLength" : 2000,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "body" ]
+      },
       "Conversation" : {
         "type" : "object",
         "properties" : {
@@ -3808,10 +3847,10 @@
             "readOnly" : true
           },
           "buyer" : {
-            "$ref" : "#/components/schemas/User"
+            "$ref" : "#/components/schemas/AuthorSummary"
           },
           "seller" : {
-            "$ref" : "#/components/schemas/User"
+            "$ref" : "#/components/schemas/AuthorSummary"
           },
           "product" : {
             "$ref" : "#/components/schemas/Product"
@@ -3841,7 +3880,7 @@
             "readOnly" : true
           },
           "sender" : {
-            "$ref" : "#/components/schemas/User",
+            "$ref" : "#/components/schemas/AuthorSummary",
             "readOnly" : true
           },
           "body" : {
@@ -3966,6 +4005,21 @@
           }
         },
         "required" : [ "email" ]
+      },
+      "ChangePasswordRequest" : {
+        "type" : "object",
+        "properties" : {
+          "currentPassword" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "newPassword" : {
+            "type" : "string",
+            "maxLength" : 2147483647,
+            "minLength" : 8
+          }
+        },
+        "required" : [ "currentPassword", "newPassword" ]
       },
       "Notification" : {
         "type" : "object",

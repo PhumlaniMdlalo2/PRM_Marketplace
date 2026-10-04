@@ -220,6 +220,56 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$.images").doesNotExist());
     }
 
+    // retire / reactivate
+
+    @Test
+    @DisplayName("a seller can take their own listing off sale")
+    void retire_ownProduct_returnsNoContent() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(productService.retire(id, sellerId)).thenReturn(true);
+
+        mockMvc.perform(post("/api/products/{id}/retire", id)
+                        .with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isNoContent());
+
+        verify(productService).retire(id, sellerId);
+    }
+
+    @Test
+    @DisplayName("retiring a competitor's listing reads as not found")
+    void retire_somebodyElsesProduct_returnsNotFound() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(productService.retire(id, intruderId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/products/{id}/retire", id)
+                        .with(as(intruderId, Role.VENDOR)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("a retired listing can be put back on sale")
+    void reactivate_ownProduct_returnsNoContent() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(productService.reactivate(id, sellerId)).thenReturn(true);
+
+        mockMvc.perform(post("/api/products/{id}/reactivate", id)
+                        .with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isNoContent());
+
+        verify(productService).reactivate(id, sellerId);
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot retire a listing")
+    void retire_rejectsAnonymous() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/products/{id}/retire", id))
+                .andExpect(status().isUnauthorized());
+
+        verify(productService, never()).retire(any(UUID.class), any(UUID.class));
+    }
+
     // update
 
     @Test

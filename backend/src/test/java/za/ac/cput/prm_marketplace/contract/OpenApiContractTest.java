@@ -15,10 +15,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -116,6 +118,19 @@ class OpenApiContractTest {
 
     private Set<String> routePaths() {
         return new TreeSet<>(paths.keySet());
+    }
+
+    /** The status codes an operation declares, or an empty set when the route or verb is absent. */
+    @SuppressWarnings("unchecked")
+    private Set<String> responseCodes(String path, String method) {
+        Map<String, Object> op = operation(path, method);
+        if (op == null) {
+            return Set.of();
+        }
+        Object responses = op.get("responses");
+        return responses instanceof Map
+                ? new TreeSet<>(((Map<String, Object>) responses).keySet())
+                : Set.of();
     }
 
     @SuppressWarnings("unchecked")
@@ -289,7 +304,8 @@ class OpenApiContractTest {
     void catalogueDestructiveRoutesAreNotExposed() {
         // A product is referenced by the order lines that bought it and a profile by every product
         // listed under it, both through non-nullable foreign keys. A delete route could only ever
-        // fail on those keys, so the routes are gone and listings are retired through active=false.
+        // fail on those keys, so the routes are gone and a listing is taken down with
+        // POST /api/products/{id}/retire instead.
         assertThat(operation("/api/products/{id}", "delete"))
                 .as("DELETE /api/products/{id} must not exist").isNull();
         assertThat(operation("/api/vendor-profiles/{id}", "delete"))
@@ -364,6 +380,89 @@ class OpenApiContractTest {
     }
 
     @Test
+    @DisplayName("a vendor profile exposes the owner id and nothing else of the account")
+    void vendorProfileExposesOwnerIdOnly() {
+        // The Contact button on a listing calls POST /conversations/start, which names a user id, so
+        // the frontend needs the owner id from a product's vendor. VendorProfile.user stays ignored
+        // because a profile read is public and the account carries an email address and a phone
+        // number. This is the seam between the two: the id, and nothing that identifies a person.
+        assertThat(schemaProperties("VendorProfile"))
+                .as("the whole account must stay off a publicly readable schema")
+                .doesNotContainKeys("user", "email", "phone", "password");
+
+        Map<String, Object> userId = schemaProperty("VendorProfile", "userId");
+        assertThat(userId)
+                .as("without this the app cannot start a conversation with a seller at all")
+                .isNotEmpty();
+        assertThat(userId)
+                .as("read-only, so a profile creation cannot attach itself to an account it does "
+                        + "not belong to")
+                .containsEntry("readOnly", Boolean.TRUE);
+    }
+
+    /** Collects the properties of a request body across every operation, as {@code path [METHOD] name}. */
+    @SuppressWarnings("unchecked")
+    private List<String> requestBodyPropertyNames() {
+        List<String> found = new ArrayList<>();
+        paths.forEach((path, operations) -> {
+            if (!(operations instanceof Map)) {
+                return;
+            }
+            ((Map<String, Object>) operations).forEach((method, operation) -> {
+                if (!METHODS.contains(method) || !(operation instanceof Map)) {
+                    return;
+                }
+                Object content = ((Map<String, Object>) operation).get("requestBody");
+                if (!(content instanceof Map)) {
+                    return;
+                }
+                Object media = ((Map<String, Object>) content).get("content");
+                if (!(media instanceof Map)) {
+                    return;
+                }
+                for (Object entry : ((Map<String, Object>) media).values()) {
+                    if (!(entry instanceof Map)) {
+                        continue;
+                    }
+                    for (String property : requestBodyProperties(((Map<String, Object>) entry).get("schema"))) {
+                        found.add(path + " [" + method.toUpperCase() + "] " + property);
+                    }
+                }
+            });
+        });
+        return found;
+    }
+
+    /**
+     * The properties a request body schema carries, following a {@code $ref} when that is all the
+     * schema holds.
+     *
+     * <p>A dedicated body type is published as a reference to its component schema, so the inline
+     * {@code properties} a naive read would look for are not there. Resolving the reference is what
+     * keeps this helper honest about what the spec actually describes.
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> requestBodyProperties(Object schema) {
+        if (!(schema instanceof Map)) {
+            return Set.of();
+        }
+        Map<String, Object> map = (Map<String, Object>) schema;
+        if (map.get("$ref") instanceof String ref && ref.startsWith("#/components/schemas/")) {
+            return schemaProperties(ref.substring("#/components/schemas/".length())).keySet();
+        }
+        if (map.get("properties") instanceof Map<?, ?> properties) {
+            return properties.keySet().stream().map(String::valueOf).collect(Collectors.toSet());
+        }
+        // An allOf composition: the real fields sit in the referenced parts.
+        if (map.get("allOf") instanceof List<?> parts) {
+            return parts.stream()
+                    .flatMap(part -> requestBodyProperties(part).stream())
+                    .collect(Collectors.toSet());
+        }
+        return Set.of();
+    }
+
+    @Test
     @DisplayName("change-password names no account, so no address parameter can appear on it")
     void changePasswordTakesNoAccountParameter() {
         List<String> onThisRoute = parameterNames().stream()
@@ -376,9 +475,96 @@ class OpenApiContractTest {
                         + "caller aim the request at another account and turned the endpoint into "
                         + "an account-existence oracle")
                 .doesNotContain("email");
-        assertThat(onThisRoute)
-                .as("the caller still has to prove they know the current password")
+    }
+
+    @Test
+    @DisplayName("sending a message keeps the text out of the URL and in the body")
+    void sendMessageCarriesTheBodyInTheRequestBodyNotTheRequestLine() {
+        String prefix = "/api/messages/conversation/{conversationId}/send [POST] ";
+
+        assertThat(parameterNames().stream()
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> name.substring(prefix.length())))
+                .as("message text in the request line is written to this server's access log, to every "
+                        + "proxy log in between, and to the sender's browser history, so private "
+                        + "correspondence would reach a far wider audience than the thread itself")
+                .doesNotContain("body", "message", "text");
+
+        assertThat(requestBodyPropertyNames().stream()
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> name.substring(prefix.length())))
+                .as("the text still has to arrive somewhere, and it should arrive in the body")
+                .contains("body");
+    }
+
+    @Test
+    @DisplayName("change-password keeps both passwords out of the URL and in the body")
+    void changePasswordCarriesPasswordsInTheBodyNotTheRequestLine() {
+        String prefix = "/api/auth/change-password [POST] ";
+
+        assertThat(parameterNames().stream()
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> name.substring(prefix.length())))
+                .as("a password in the request line lands in every access log, proxy log and browser "
+                        + "history entry on the way to this server, so neither password may be "
+                        + "declared as a parameter here")
+                .doesNotContain("currentPassword", "newPassword", "password");
+
+        assertThat(requestBodyPropertyNames().stream()
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> name.substring(prefix.length())))
+                .as("the caller still has to prove they know the current password, and the new one "
+                        + "still has to arrive somewhere")
                 .contains("currentPassword", "newPassword");
+    }
+
+    /**
+     * Every route that answers 204 has to say so.
+     *
+     * <p>springdoc infers 200 for any response it cannot otherwise prove, so a route returning
+     * {@code ResponseEntity.noContent()} was documented as 200 unless it declared itself. That is not
+     * a cosmetic gap: the frontend branches on exactly this difference, treating a 204 from
+     * {@code POST /api/saved-items/product/{productId}/toggle} as "now unsaved" and a 200 as "now
+     * saved", and a client generated from the spec would be told to expect a body that never arrives.
+     *
+     * <p>Written as an explicit list rather than derived from the controllers, because a derived check
+     * would need to read the source anyway and would go quiet the moment the sources move.
+     */
+    @Test
+    @DisplayName("routes that answer 204 declare it, and the state-changing toggles declare both")
+    void noContentRoutesDeclareTheirStatus() {
+        Map<String, Set<String>> expected = new LinkedHashMap<>();
+        expected.put("/api/addresses/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/bulletin-posts/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/cart-items [DELETE]", Set.of("204"));
+        expected.put("/api/cart-items/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/comments/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/conversations/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/notifications/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/orders/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/orders/{id}/cancel [PATCH]", Set.of("204"));
+        expected.put("/api/post-likes/post/{postId}/toggle [POST]", Set.of("201", "204"));
+        expected.put("/api/product-images/product/{productId} [DELETE]", Set.of("204"));
+        expected.put("/api/product-images/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/products/{id}/reactivate [POST]", Set.of("204"));
+        expected.put("/api/products/{id}/retire [POST]", Set.of("204"));
+        expected.put("/api/reports/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/reviews/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/saved-items/product/{productId}/toggle [POST]", Set.of("200", "204"));
+        expected.put("/api/saved-items/product/{productId} [DELETE]", Set.of("204"));
+        expected.put("/api/saved-items/{id} [DELETE]", Set.of("204"));
+        expected.put("/api/users/{id} [DELETE]", Set.of("204"));
+
+        expected.forEach((route, statuses) -> {
+            String path = route.substring(0, route.lastIndexOf(' '));
+            String method = route.substring(route.lastIndexOf('[') + 1, route.length() - 1).toLowerCase();
+
+            assertThat(responseCodes(path, method))
+                    .as("%s answers %s, so the contract has to say the same thing. A generated client "
+                            + "otherwise waits for a body that is not coming, and a client that reads the "
+                            + "status to decide what happened reads it wrong.", route, statuses)
+                    .containsExactlyInAnyOrderElementsOf(statuses);
+        });
     }
 
     @Test

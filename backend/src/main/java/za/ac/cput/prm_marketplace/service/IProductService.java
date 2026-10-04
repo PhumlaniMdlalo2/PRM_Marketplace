@@ -18,8 +18,8 @@ import org.springframework.data.domain.Page;
  * <p>{@code delete} is gone rather than guarded, and this is the same reason as for vendor
  * profiles: a product is referenced by the order lines that bought it, through a non-nullable
  * foreign key. Deleting a product that has been sold fails on that key and the endpoint answers
- * 500. The {@code active} flag is the supported way to retire a listing, and the vendor sets it
- * through {@link #update}.
+ * 500. Retiring is the supported way to take a listing down, through {@link #retire}, so that the
+ * intent is always visible in the request rather than hidden in an update body.
  */
 public interface IProductService {
 
@@ -38,19 +38,38 @@ public interface IProductService {
      * Updates one of the caller's own listings.
      *
      * <p>The vendor and creation time are carried over from the stored row, so a request cannot
-     * move a listing to another seller or rewrite its history. Returns null when the product does
-     * not exist or is not the caller's.
+     * move a listing to another seller or rewrite its history. The {@code active} flag is carried
+     * over too and is deliberately not read from the body: {@code Product.active} is a primitive
+     * boolean, so a body that simply omits it deserialises as false and every such request would
+     * quietly retire the listing. Use {@link #retire} and {@link #reactivate} to change it.
+     *
+     * <p>Returns null when the product does not exist or is not the caller's.
      */
     Product update(UUID id, Product product, UUID requesterId);
 
-    /** The caller's own listings, newest first. */
+    /**
+     * Takes one of the caller's own listings down without removing it.
+     *
+     * @return false when the listing does not exist or belongs to somebody else
+     */
+    boolean retire(UUID id, UUID requesterId);
+
+    /** Puts a retired listing back on sale. False when it is not the caller's. */
+    boolean reactivate(UUID id, UUID requesterId);
+
+    /**
+     * The caller's own listings, newest first, retired ones included: a seller has to be able to see
+     * and undo what they took down.
+     */
     List<Product> getMine(UUID requesterId);
 
-    /** The whole catalogue. Public. */
+    /** The catalogue as a buyer sees it, which means live listings only. Public. */
     List<Product> getAll();
 
+    /** A vendor's live listings. Public. */
     List<Product> getByVendor(UUID vendorId);
 
+    /** Live listings in one category. Public. */
     List<Product> getByCategory(String category);
 
     Page<Product> search(ProductSearchCriteria criteria);

@@ -105,7 +105,8 @@ class MessageControllerTest {
         when(messageService.send(eq(conversationId), eq(callerId), anyString())).thenReturn(message);
 
         mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
-                        .param("body", "Still available?")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Still available?\"}")
                         .with(asStudent(callerId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(messageId.toString()));
@@ -114,12 +115,53 @@ class MessageControllerTest {
     }
 
     @Test
+    @DisplayName("message text is not read from the request line")
+    void send_keepsTheBodyOutOfTheRequestLine() throws Exception {
+        when(messageService.send(eq(conversationId), eq(callerId), anyString())).thenReturn(message);
+
+        // A `body` parameter alone can no longer satisfy this endpoint. Private correspondence used to
+        // travel in the URL, which put it in every access log, proxy log and history entry on the way
+        // here, so the text must arrive in the body or not at all.
+        mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
+                        .param("body", "Still available?")
+                        .with(asStudent(callerId)))
+                .andExpect(status().is4xxClientError());
+
+        verify(messageService, never()).send(any(UUID.class), any(UUID.class), anyString());
+    }
+
+    @Test
+    @DisplayName("an empty message is rejected before it reaches the service")
+    void send_rejectsAnEmptyBody() throws Exception {
+        mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"   \"}")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(messageService);
+    }
+
+    @Test
+    @DisplayName("a message longer than the column allows is rejected")
+    void send_rejectsAnOverlongBody() throws Exception {
+        mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"" + "x".repeat(2001) + "\"}")
+                        .with(asStudent(callerId)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(messageService);
+    }
+
+    @Test
     @DisplayName("sending into a thread the caller is not part of returns 400")
     void send_returnsBadRequestForNonParticipant() throws Exception {
         when(messageService.send(conversationId, callerId, "hello")).thenReturn(null);
 
         mockMvc.perform(post("/api/messages/conversation/" + conversationId + "/send")
-                        .param("body", "hello")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"hello\"}")
                         .with(asStudent(callerId)))
                 .andExpect(status().isBadRequest());
     }

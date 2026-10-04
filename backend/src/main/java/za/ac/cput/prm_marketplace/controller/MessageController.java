@@ -1,11 +1,13 @@
 package za.ac.cput.prm_marketplace.controller;
 
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Message;
+import za.ac.cput.prm_marketplace.dto.SendMessageRequest;
 import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IMessageService;
 
@@ -46,12 +48,20 @@ public class MessageController {
     /**
      * Sends a message as the caller. The senderId parameter is gone: it was read from the request,
      * so anyone could post into a thread under somebody else's name.
+     *
+     * <p>The {@code body} request parameter is gone for the same reason the passwords are out of the
+     * change-password URL. Message text is private correspondence between two named accounts, and as
+     * a parameter it sat in the request line, which means it was written to this server's access log,
+     * to every proxy log along the way, and to the sender's browser history. Private mail should have
+     * exactly two readers. Validation now lives on {@link SendMessageRequest}, which also caps the
+     * length at the column's own limit so an over-long message is a 400 rather than a truncated row.
      */
     @PostMapping("/conversation/{conversationId}/send")
     public ResponseEntity<Message> send(@PathVariable UUID conversationId,
-                                        @RequestParam String body,
+                                        @Valid @RequestBody SendMessageRequest request,
                                         Authentication authentication) {
-        Message sent = messageService.send(conversationId, CurrentCaller.id(authentication), body);
+        Message sent = messageService.send(conversationId, CurrentCaller.id(authentication),
+                request.body());
         if (sent == null) {
             return ResponseEntity.badRequest().build();
         }

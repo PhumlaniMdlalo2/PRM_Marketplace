@@ -14,6 +14,8 @@ import za.ac.cput.prm_marketplace.service.IOrderService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 /**
  * Every handler takes the caller from the validated token via {@link UserPrincipal}. Nothing here
@@ -87,6 +89,9 @@ public class OrderController {
     }
 
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(Authentication caller,
                                        @PathVariable UUID id) {
         boolean deleted = orderService.delete(id, callerId(caller));
@@ -150,6 +155,9 @@ public class OrderController {
      * order by passing the victim's id. It now comes from the token.
      */
     @PatchMapping("/{id}/cancel")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> cancel(Authentication caller,
                                        @PathVariable UUID id) {
         boolean cancelled = orderService.cancel(id, callerId(caller));

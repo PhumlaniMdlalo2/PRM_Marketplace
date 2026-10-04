@@ -9,6 +9,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
 import za.ac.cput.prm_marketplace.repository.CartItemRepository;
 import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
@@ -119,6 +120,36 @@ class CartItemServiceImplTest {
                 .hasMessageContaining("not available");
 
         verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a seller cannot buy their own listing")
+    void addToCart_rejectsTheCallersOwnListing() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId))
+                .thenReturn(Optional.of(buildProductSoldBy(ownerId)));
+
+        // The product page disables the button for your own listing, but that is a client-side
+        // courtesy. Left here, a seller could be both sides of one order: approving their own
+        // fulfilment and paying themselves.
+        assertThatThrownBy(() -> service.addToCart(ownerId, productId, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("your own listing");
+
+        verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("somebody else's listing can still be bought")
+    void addToCart_allowsAnotherSellersListing() {
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(buildUser(ownerId)));
+        when(productRepository.findById(productId))
+                .thenReturn(Optional.of(buildProductSoldBy(intruderId)));
+        when(cartItemRepository.findByUser_IdAndProduct_Id(ownerId, productId))
+                .thenReturn(Optional.empty());
+        when(cartItemRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        assertThat(service.addToCart(ownerId, productId, 1)).isNotNull();
     }
 
     @Test
@@ -273,6 +304,22 @@ class CartItemServiceImplTest {
                 .price(new BigDecimal("10.00"))
                 .stockQuantity(50)
                 .active(active)
+                .build();
+    }
+
+    /** A live listing whose vendor profile belongs to the given account. */
+    private Product buildProductSoldBy(UUID sellerId) {
+        VendorProfile profile = new VendorProfile.Builder()
+                .setBusinessName("Probe Trading")
+                .setUser(buildUser(sellerId))
+                .build();
+        return new Product.Builder()
+                .id(productId)
+                .name("Widget")
+                .price(new BigDecimal("10.00"))
+                .stockQuantity(50)
+                .active(true)
+                .vendor(profile)
                 .build();
     }
 

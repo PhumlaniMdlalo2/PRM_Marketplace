@@ -11,6 +11,8 @@ import za.ac.cput.prm_marketplace.service.ICartItemService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 @RestController
 @RequestMapping("/api/cart-items")
@@ -66,6 +68,9 @@ public class CartItemController {
     }
 
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
         if (!cartItemService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
@@ -75,6 +80,9 @@ public class CartItemController {
 
     /** Empties the caller's cart. The former "/user/{userId}" route is gone. */
     @DeleteMapping
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> clearCart(Authentication authentication) {
         cartItemService.clearCart(CurrentCaller.id(authentication));
         return ResponseEntity.noContent().build();

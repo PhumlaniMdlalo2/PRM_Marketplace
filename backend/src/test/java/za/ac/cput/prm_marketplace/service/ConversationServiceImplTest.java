@@ -5,12 +5,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.Conversation;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.repository.ConversationRepository;
+import za.ac.cput.prm_marketplace.repository.MessageRepository;
 import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
@@ -20,6 +22,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -37,6 +40,9 @@ class ConversationServiceImplTest {
     @Mock
     private ProductRepository productRepository;
 
+    @Mock
+    private MessageRepository messageRepository;
+
     private ConversationServiceImpl service;
 
     private UUID buyerId;
@@ -47,7 +53,8 @@ class ConversationServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new ConversationServiceImpl(conversationRepository, userRepository, productRepository);
+        service = new ConversationServiceImpl(conversationRepository, userRepository, productRepository,
+                messageRepository);
         buyerId = UUID.randomUUID();
         sellerId = UUID.randomUUID();
         outsiderId = UUID.randomUUID();
@@ -157,7 +164,24 @@ class ConversationServiceImplTest {
                 .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
 
         assertThat(service.delete(conversationId, buyerId)).isTrue();
-        verify(conversationRepository).deleteById(conversationId);
+        // The messages go first: messages.conversation_id is non-nullable, so deleting the thread
+        // with history still in it raised a constraint violation and a 500. It only ever happened
+        // once somebody had written in the thread, so an empty thread deleted fine and hid this.
+        InOrder order = inOrder(messageRepository, conversationRepository);
+        order.verify(messageRepository).deleteByConversationId(conversationId);
+        order.verify(conversationRepository).deleteById(conversationId);
+    }
+
+    @Test
+    @DisplayName("an outsider's delete does not touch the messages either")
+    void delete_refusesOutsiderWithoutDeletingMessages() {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(buildConversation(buyerId, sellerId)));
+
+        assertThat(service.delete(conversationId, outsiderId)).isFalse();
+
+        verify(conversationRepository, never()).deleteById(any());
+        verifyNoInteractions(messageRepository);
     }
 
     @Test

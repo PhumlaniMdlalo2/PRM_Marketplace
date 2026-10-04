@@ -7,6 +7,7 @@ import za.ac.cput.prm_marketplace.domain.MessageStatus;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.repository.ConversationRepository;
+import za.ac.cput.prm_marketplace.repository.MessageRepository;
 import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
@@ -20,13 +21,16 @@ public class ConversationServiceImpl implements IConversationService {
     private final ConversationRepository conversationRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final MessageRepository messageRepository;
 
     public ConversationServiceImpl(ConversationRepository conversationRepository,
                                    UserRepository userRepository,
-                                   ProductRepository productRepository) {
+                                   ProductRepository productRepository,
+                                   MessageRepository messageRepository) {
         this.conversationRepository = conversationRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
+        this.messageRepository = messageRepository;
     }
 
     @Override
@@ -62,12 +66,22 @@ public class ConversationServiceImpl implements IConversationService {
         return isParticipant(conversation, requesterId) ? conversation : null;
     }
 
+    /**
+     * Deletes a thread the caller is part of, and everything in it.
+     *
+     * <p>The messages go first. {@code messages.conversation_id} is a non-nullable foreign key onto
+     * this row, so deleting a conversation that has history raises a constraint violation instead of
+     * deleting anything — and it raises it as a 500, because a database constraint is not something
+     * the handler recognises. The failure only ever appears on a thread somebody has actually written
+     * in, so an empty thread deleted fine and made this look working until it wasn't.
+     */
     @Override
     @Transactional
     public boolean delete(UUID id, UUID requesterId) {
         if (read(id, requesterId) == null) {
             return false;
         }
+        messageRepository.deleteByConversationId(id);
         conversationRepository.deleteById(id);
         return true;
     }

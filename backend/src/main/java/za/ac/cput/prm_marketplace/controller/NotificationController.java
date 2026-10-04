@@ -9,6 +9,8 @@ import za.ac.cput.prm_marketplace.service.INotificationService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 /**
  * Mounted under "/api" to match the rest of the application. The old "/notifications" mapping sat
@@ -54,6 +56,9 @@ public class NotificationController {
     }
 
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
         if (!notificationService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();

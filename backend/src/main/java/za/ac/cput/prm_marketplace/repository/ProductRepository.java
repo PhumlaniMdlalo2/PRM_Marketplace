@@ -45,11 +45,20 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
      * <p>This is the ownership check behind every write to a product. It reaches through product to
      * vendor to user, because a product stores no owner id of its own: the owner is whoever holds
      * the vendor profile the listing sits under.
+     *
+     * <p>Written as an explicit {@code p.vendor.user.id} traversal rather than left derived, because
+     * {@code VendorProfile} now carries a read-only {@code userId} property for the response body.
+     * Spring Data prefers a matching bean property over splitting the method name into a path, so
+     * the derived form compiled to {@code where v.userId = :userId} — an attribute the entity does not
+     * have — and every one of these threw at runtime. This is the same trap
+     * {@link Comment#getParentId()} set on {@link CommentRepository} earlier.
      */
-    Optional<Product> findByIdAndVendorUserId(UUID id, UUID userId);
+    @Query("select p from Product p where p.id = :id and p.vendor.user.id = :userId")
+    Optional<Product> findByIdAndVendorUserId(@Param("id") UUID id, @Param("userId") UUID userId);
 
-    /** The caller's own listings, newest first. */
-    List<Product> findByVendorUserIdOrderByCreatedAtDesc(UUID userId);
+    /** The caller's own listings, newest first. Explicit for the reason given above. */
+    @Query("select p from Product p where p.vendor.user.id = :userId order by p.createdAt desc")
+    List<Product> findByVendorUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId);
 
     /**
      * Reserves stock in a single statement.

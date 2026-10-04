@@ -1,7 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
+import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 import jakarta.persistence.*;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -67,6 +70,9 @@ public class Report {
         return id;
     }
 
+    /** Serialised through {@link AuthorSummary}: see {@code AuthorSummary} for why. */
+    @Schema(implementation = AuthorSummary.class)
+    @JsonSerialize(using = AuthorSummary.Serializer.class)
     public User getReporter() {
         return reporter;
     }

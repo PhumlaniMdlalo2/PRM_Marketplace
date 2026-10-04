@@ -28,6 +28,15 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
                                                         MessageStatus status,
                                                         UUID senderId);
 
+    /**
+     * Removes every message in a thread.
+     *
+     * <p>This exists because deleting a conversation fails on the foreign key from {@code messages}
+     * otherwise. That is not a rare edge case: a thread nobody ever wrote in can be deleted, so the
+     * failure only ever appears once somebody has actually used the thread, which is the normal case.
+     */
+    void deleteByConversationId(UUID conversationId);
+
     @Modifying
     @Query("update Message m set m.status = :status, m.readAt = CURRENT_TIMESTAMP "
             + "where m.conversation.id = :conversationId "

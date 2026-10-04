@@ -11,6 +11,8 @@ import za.ac.cput.prm_marketplace.service.IProductImageService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 /**
  * The photographs attached to a listing.
@@ -72,6 +74,9 @@ public class ProductImageController {
     }
 
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
         if (!productImageService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
@@ -95,6 +100,9 @@ public class ProductImageController {
 
     /** Clears the gallery on one of the caller's own products. */
     @DeleteMapping("/product/{productId}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> deleteByProduct(@PathVariable UUID productId,
                                                 Authentication authentication) {
         if (!productImageService.deleteByProduct(productId, CurrentCaller.id(authentication))) {

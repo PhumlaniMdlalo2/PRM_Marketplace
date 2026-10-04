@@ -135,10 +135,48 @@ public class ProductServiceImpl implements IProductService {
                 .city(product.getCity() != null ? product.getCity() : existing.getCity())
                 .province(product.getProvince() != null
                         ? product.getProvince() : existing.getProvince())
-                .active(product.isActive())
+                // Retired with the stored row instead of the request, so an edit cannot take a listing off
+        // sale by accident. See retire() for why that field is not writable here.
+                .active(existing.isActive())
                 .build();
 
         return productRepository.save(updated);
+    }
+
+    /**
+     * Takes a listing down while keeping the row, so the order lines that bought it stay valid.
+     *
+     * <p>This is a separate method, and a separate route, rather than a field in the update body for
+     * a concrete reason: {@code Product.active} is a primitive boolean, so an update body that leaves
+     * the flag out arrives as false and every ordinary edit - a price change, a typo fix - would
+     * quietly take the listing off sale. Nothing about that failure is visible in the request.
+     */
+    @Override
+    @Transactional
+    public boolean retire(UUID id, UUID requesterId) {
+        return setActive(id, requesterId, false);
+    }
+
+    @Override
+    @Transactional
+    public boolean reactivate(UUID id, UUID requesterId) {
+        return setActive(id, requesterId, true);
+    }
+
+    private boolean setActive(UUID id, UUID requesterId, boolean active) {
+        if (id == null || requesterId == null) {
+            return false;
+        }
+
+        // Same ownership lookup as update: somebody else's listing is reported as not found rather
+        // than forbidden, so this cannot be used to confirm that a given listing exists.
+        Product existing = productRepository.findByIdAndVendorUserId(id, requesterId).orElse(null);
+        if (existing == null) {
+            return false;
+        }
+
+        productRepository.save(Product.builder().copy(existing).active(active).build());
+        return true;
     }
 
     @Override
@@ -153,7 +191,9 @@ public class ProductServiceImpl implements IProductService {
     @Override
     @Transactional(readOnly = true)
     public List<Product> getAll() {
-        return productRepository.findAll();
+        // Live listings only. Search already filters on active, so leaving this unfiltered meant a
+        // retired item vanished from search results but was still sitting in the browse grid.
+        return productRepository.findByActiveTrue();
     }
 
     @Override
@@ -162,7 +202,7 @@ public class ProductServiceImpl implements IProductService {
         if (vendorId == null) {
             return List.of();
         }
-        return productRepository.findByVendorId(vendorId);
+        return productRepository.findByVendorIdAndActiveTrue(vendorId);
     }
 
     @Override
@@ -171,7 +211,7 @@ public class ProductServiceImpl implements IProductService {
         if (category == null) {
             return List.of();
         }
-        return productRepository.findByCategory(category);
+        return productRepository.findByActiveTrueAndCategory(category);
     }
 
     @Override

@@ -4,16 +4,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import za.ac.cput.prm_marketplace.dto.ApiError;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -153,6 +156,30 @@ class GlobalExceptionHandlerTest {
                 .containsEntry("name", "Name is required")
                 .containsEntry("email", "Email is invalid")
                 .hasSize(2);
+    }
+
+    @Test
+    @DisplayName("the wrong content type is a 415 naming what is accepted, not a 500")
+    void unsupportedMediaType_mapsTo415AndSaysWhatIsAccepted() {
+        HttpMediaTypeNotSupportedException ex = new HttpMediaTypeNotSupportedException(
+                "Content-Type 'application/x-www-form-urlencoded' is not supported",
+                List.of(MediaType.APPLICATION_JSON));
+
+        ResponseEntity<Object> response = handler.handleUnsupportedMediaType(ex, request());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        assertThat(body(response).status()).isEqualTo(415);
+        assertThat(body(response).message()).contains("application/json");
+    }
+
+    @Test
+    @DisplayName("an unsupported content type with nothing advertised still names JSON")
+    void unsupportedMediaType_withoutSupportedTypes_fallsBack() {
+        ResponseEntity<Object> response = handler.handleUnsupportedMediaType(
+                new HttpMediaTypeNotSupportedException("no match"), request());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        assertThat(body(response).message()).contains("application/json");
     }
 
     @Test

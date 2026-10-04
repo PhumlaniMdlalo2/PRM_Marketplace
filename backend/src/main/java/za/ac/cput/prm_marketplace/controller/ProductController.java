@@ -16,6 +16,8 @@ import za.ac.cput.prm_marketplace.service.IProductService;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 /**
  * Browsing is public; writing is not.
@@ -25,8 +27,10 @@ import java.util.UUID;
  * edit or delete any listing by id.
  *
  * <p>There is no delete route. A product that has been ordered is referenced by the order line,
- * so removing the row fails on the foreign key; sellers retire a listing by setting
- * {@code active} to false through the update route.
+ * so removing the row fails on the foreign key. A seller takes a listing down with
+ * {@code POST /{id}/retire} instead, which is a route of its own rather than a field in the update
+ * body: {@code Product.active} is a primitive boolean, so an update that omits it deserialises as
+ * false and every ordinary price edit would quietly retire the listing.
  */
 @RestController
 @RequestMapping("/api/products")
@@ -90,7 +94,12 @@ public class ProductController {
         return ResponseEntity.ok(product);
     }
 
-    /** Updates one of the caller's own listings. Somebody else's is reported as not found. */
+    /**
+     * Updates one of the caller's own listings. Somebody else's is reported as not found.
+     *
+     * <p>The body's {@code active} flag is ignored: the stored value is kept, so editing a price can
+     * never take a listing off sale.
+     */
     @PutMapping("/{id}")
     public ResponseEntity<Product> update(@PathVariable UUID id,
                                           @RequestBody Product product,
@@ -100,6 +109,35 @@ public class ProductController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(updated);
+    }
+
+    /**
+     * Takes one of the caller's own listings off sale. Somebody else's is reported as not found.
+     *
+     * <p>Answers 204 either way the listing is found, whether or not it was already retired, so the
+     * client does not have to know the current state to make the call idempotent.
+     */
+    @PostMapping("/{id}/retire")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
+    public ResponseEntity<Void> retire(@PathVariable UUID id, Authentication authentication) {
+        if (!productService.retire(id, CurrentCaller.id(authentication))) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Puts a retired listing back on sale. Same ownership rule as retire. */
+    @PostMapping("/{id}/reactivate")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
+    public ResponseEntity<Void> reactivate(@PathVariable UUID id, Authentication authentication) {
+        if (!productService.reactivate(id, CurrentCaller.id(authentication))) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

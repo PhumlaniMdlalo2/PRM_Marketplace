@@ -10,6 +10,8 @@ import za.ac.cput.prm_marketplace.service.ISavedItemService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 @RestController
 @RequestMapping("/api/saved-items")
@@ -46,6 +48,9 @@ public class SavedItemController {
     }
 
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
         if (!savedItemService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
@@ -58,6 +63,10 @@ public class SavedItemController {
      * from the path, so one account could save and unsave items on any other account's list.
      */
     @PostMapping("/product/{productId}/toggle")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "The resource is now saved and the full row is returned."),
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<SavedItem> toggle(@PathVariable UUID productId, Authentication authentication) {
         SavedItem result = savedItemService.toggle(CurrentCaller.id(authentication), productId);
         return result == null
@@ -66,6 +75,9 @@ public class SavedItemController {
     }
 
     @DeleteMapping("/product/{productId}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> removeByUserAndProduct(@PathVariable UUID productId,
                                                        Authentication authentication) {
         if (!savedItemService.removeByUserAndProduct(CurrentCaller.id(authentication), productId)) {

@@ -153,4 +153,45 @@ class MessageRepositoryTest {
         assertThat(conversationRepository.countUnreadConversations(john.getId(), MessageStatus.READ))
                 .isZero();
     }
+
+    @Test
+    @DisplayName("a thread's messages are removed, which is what lets the thread itself be deleted")
+    void deleteByConversationId_removesOnlyThatThreadsMessages() {
+        Conversation otherThread = conversationRepository.save(new Conversation.Builder()
+                .setBuyer(jane)
+                .setSeller(john)
+                .build());
+        saveMessage(john, "Still available?", MessageStatus.SENT);
+        saveMessage(jane, "Yes it is", MessageStatus.SENT);
+        Message someoneElses = messageRepository.save(new Message.Builder()
+                .setConversation(otherThread)
+                .setSender(jane)
+                .setBody("Different thread")
+                .setStatus(MessageStatus.SENT)
+                .build());
+
+        messageRepository.deleteByConversationId(conversation.getId());
+
+        // The foreign key from messages to conversations is non-nullable, so a thread with history
+        // could not be deleted at all without this. It only ever showed up once somebody had written
+        // in the thread: an empty thread deleted cleanly and made the endpoint look working.
+        entityManager.flush();
+        assertThat(conversationRepository.findById(conversation.getId())).isPresent();
+        assertThat(messageRepository.findByConversationIdOrderBySentAtAsc(conversation.getId())).isEmpty();
+        assertThat(messageRepository.findById(someoneElses.getId())).isPresent();
+    }
+
+    @Test
+    @DisplayName("deleting a thread and its messages together leaves nothing behind")
+    void deletingAThreadWithMessages_succeeds() {
+        saveMessage(john, "Is the desk still available?", MessageStatus.SENT);
+        saveMessage(jane, "Yes it is", MessageStatus.DELIVERED);
+
+        messageRepository.deleteByConversationId(conversation.getId());
+        conversationRepository.deleteById(conversation.getId());
+        entityManager.flush();
+
+        assertThat(conversationRepository.findById(conversation.getId())).isEmpty();
+        assertThat(messageRepository.findAll()).isEmpty();
+    }
 }

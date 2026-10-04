@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 /**
  * Account reads and the caller's own profile edit.
@@ -23,7 +25,7 @@ import java.util.UUID;
  * lone {@code /users} route, which meant it also sat outside the {@code /api/**} group that
  * {@code SecurityConfig} reasons about.
  *
- * <p>The two write endpoints this used to expose — {@code POST /users} and {@code PUT /users} —
+ * <p>The two write endpoints this used to expose ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â {@code POST /users} and {@code PUT /users} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
  * are gone. Both took a {@code User} entity from the request body and both are privilege
  * escalations: {@code PUT} in particular took the target account from {@code user.getId()} in the
  * body and saved every field of it, so any authenticated caller could set another account's
@@ -97,7 +99,7 @@ public class UserController {
     }
 
     /**
-     * Lookup by email. Faculty-only, for the same reason as {@link #getAll} — unrestricted, it is a
+     * Lookup by email. Faculty-only, for the same reason as {@link #getAll} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â unrestricted, it is a
      * membership oracle that confirms whether a given address has an account here.
      */
     @GetMapping("/email/{email}")
@@ -115,6 +117,9 @@ public class UserController {
      * <p>Previously any signed-in user could delete any account by id.
      */
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(Authentication caller, @PathVariable UUID id) {
         UUID callerId = CurrentCaller.id(caller);
         if (!callerId.equals(id) && CurrentCaller.role(caller) != Role.FACULTY) {

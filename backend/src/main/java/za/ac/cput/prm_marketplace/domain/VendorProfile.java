@@ -79,6 +79,24 @@ public class VendorProfile {
         return user;
     }
 
+    /**
+     * The id of the account behind this profile, and nothing else about it.
+     *
+     * <p>{@code user} itself is {@code @JsonIgnore} because a profile read is a public endpoint and
+     * serialising the account would publish that person's email and phone to anyone browsing
+     * listings. That left the frontend with no way to reach {@code POST /conversations/start}, which
+     * names a user id: the Contact button had nothing to send, so no conversation could be started
+     * from anywhere in the app.
+     *
+     * <p>So this exposes the id alone. It is an opaque primary key that the API already hands out
+     * publicly in {@code AuthorSummary} on every bulletin post and comment, it names no account, and
+     * it is read-only, so it cannot be pointed at an owner by writing it.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public UUID getUserId() {
+        return user == null ? null : user.getId();
+    }
+
     public String getBusinessName() {
         return businessName;
     }

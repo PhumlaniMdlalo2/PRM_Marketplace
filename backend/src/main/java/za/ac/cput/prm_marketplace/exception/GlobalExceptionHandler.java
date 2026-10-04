@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -106,6 +107,23 @@ public class GlobalExceptionHandler {
                                                            HttpServletRequest request) {
         return build(HttpStatus.METHOD_NOT_ALLOWED,
                 "Method " + request.getMethod() + " is not supported for this endpoint", request, null);
+    }
+
+    /**
+     * A request sent with the wrong content type is the caller's mistake, not a fault here.
+     *
+     * <p>Without this the catch-all answered 500 and logged a stack trace, so a client that posted a
+     * form to a JSON endpoint looked like a server outage. That hides real faults behind noise, and it
+     * misdirects whoever is on call towards the server instead of the caller. The list of types this
+     * endpoint accepts is in the message, which is the one thing the caller needs to fix the request.
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Object> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException ex,
+                                                              HttpServletRequest request) {
+        String supported = ex.getSupportedMediaTypes().isEmpty()
+                ? "This endpoint accepts application/json"
+                : "This endpoint accepts " + ex.getSupportedMediaTypes();
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, supported, request, null);
     }
 
     @ExceptionHandler(Exception.class)

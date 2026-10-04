@@ -11,6 +11,8 @@ import za.ac.cput.prm_marketplace.service.IBulletinPostService;
 
 import java.util.List;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 @RestController
 @RequestMapping("/api/bulletin-posts")
@@ -72,6 +74,9 @@ public class BulletinPostController {
 
     /** @return 404 unless the caller wrote the post */
     @DeleteMapping("/{id}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
+    })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
         if (!bulletinPostService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();

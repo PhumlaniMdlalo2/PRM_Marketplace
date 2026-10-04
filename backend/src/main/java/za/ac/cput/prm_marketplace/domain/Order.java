@@ -1,8 +1,11 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import tools.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
+import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -64,6 +67,9 @@ public class Order {
  * body would let anyone place an order in somebody else's name.
  */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    /** Serialised through {@link AuthorSummary}: see {@code AuthorSummary} for why. */
+    @Schema(implementation = AuthorSummary.class)
+    @JsonSerialize(using = AuthorSummary.Serializer.class)
     public User getBuyer() {
         return buyer;
     }

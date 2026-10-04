@@ -49,6 +49,15 @@ public class CartItemServiceImpl implements ICartItemService {
         if (!product.isActive()) {
             throw new IllegalArgumentException("Product is not available: " + productId);
         }
+        // A seller buying their own listing is a purchase that cannot mean anything: the seller is on
+        // both sides of it, so the seller-side order status they are supposed to advance is theirs to
+        // approve, and the money goes nowhere. The product page already disables the button, but the
+        // client is not the boundary — this has to hold for any caller.
+        if (product.getVendor() != null
+                && product.getVendor().getUser() != null
+                && product.getVendor().getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("You cannot buy your own listing: " + productId);
+        }
 
         Optional<CartItem> existing = cartItemRepository.findByUser_IdAndProduct_Id(requesterId, productId);
         if (existing.isPresent()) {
