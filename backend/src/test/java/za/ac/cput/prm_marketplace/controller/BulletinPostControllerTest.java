@@ -234,6 +234,19 @@ class BulletinPostControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("a post names its author by id and name only, not by email")
+    void read_reducesTheAuthorToASummary() throws Exception {
+        when(bulletinPostService.read(postId)).thenReturn(post);
+
+        mockMvc.perform(get("/api/bulletin-posts/" + postId).with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.author.id").value(authorId.toString()))
+                .andExpect(jsonPath("$.author.email").doesNotExist())
+                .andExpect(jsonPath("$.author.phone").doesNotExist())
+                .andExpect(jsonPath("$.author.role").doesNotExist());
+    }
+
     private User buildUser(UUID id) {
         return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }

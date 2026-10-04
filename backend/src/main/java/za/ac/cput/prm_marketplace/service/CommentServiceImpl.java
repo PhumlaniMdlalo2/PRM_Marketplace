@@ -125,7 +125,7 @@ public class CommentServiceImpl implements ICommentService {
 
         while (!pending.isEmpty()) {
             UUID parentId = pending.pop();
-            for (Comment reply : commentRepository.findByParentId(parentId)) {
+            for (Comment reply : commentRepository.findByParent_Id(parentId)) {
                 collected.add(reply);
                 if (reply.getId() != null) {
                     pending.push(reply.getId());
@@ -145,7 +145,7 @@ public class CommentServiceImpl implements ICommentService {
         if (postId == null) {
             return List.of();
         }
-        return commentRepository.findByPostIdOrderByCreatedAtAsc(postId);
+        return commentRepository.findByPost_IdOrderByCreatedAtAsc(postId);
     }
 
     @Override
@@ -153,7 +153,7 @@ public class CommentServiceImpl implements ICommentService {
         if (postId == null) {
             return List.of();
         }
-        return commentRepository.findByPostIdAndParentIsNullOrderByCreatedAtAsc(postId);
+        return commentRepository.findByPost_IdAndParentIsNullOrderByCreatedAtAsc(postId);
     }
 
     @Override
@@ -161,7 +161,7 @@ public class CommentServiceImpl implements ICommentService {
         if (postId == null || parentId == null) {
             return List.of();
         }
-        return commentRepository.findByPostIdAndParentIdOrderByCreatedAtAsc(postId, parentId);
+        return commentRepository.findByPost_IdAndParent_IdOrderByCreatedAtAsc(postId, parentId);
     }
 
     @Override
@@ -169,7 +169,7 @@ public class CommentServiceImpl implements ICommentService {
         if (authorId == null) {
             return List.of();
         }
-        return commentRepository.findByAuthorIdOrderByCreatedAtDesc(authorId);
+        return commentRepository.findByAuthor_IdOrderByCreatedAtDesc(authorId);
     }
 
     @Override
@@ -177,7 +177,7 @@ public class CommentServiceImpl implements ICommentService {
         if (postId == null) {
             return 0L;
         }
-        return commentRepository.countByPostId(postId);
+        return commentRepository.countByPost_Id(postId);
     }
 
     private boolean isAuthor(Comment comment, UUID userId) {

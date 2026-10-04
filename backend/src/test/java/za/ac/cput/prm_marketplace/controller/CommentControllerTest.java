@@ -229,6 +229,41 @@ class CommentControllerTest {
         verify(commentService, never()).delete(any(), any());
     }
 
+    @Test
+    @DisplayName("a comment names its author by id and name only, not by email")
+    void getByPost_reducesTheAuthorToASummary() throws Exception {
+        when(commentService.getByPost(postId)).thenReturn(List.of(comment));
+
+        mockMvc.perform(get("/api/comments/post/" + postId).with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].author.id").value(authorId.toString()))
+                .andExpect(jsonPath("$[0].author.email").doesNotExist())
+                .andExpect(jsonPath("$[0].author.phone").doesNotExist())
+                .andExpect(jsonPath("$[0].author.role").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("a reply reports the id of the comment it answers")
+    void getByPost_namesTheParentOfAReply() throws Exception {
+        Comment reply = new Comment.Builder()
+                .setId(UUID.randomUUID())
+                .setPost(post)
+                .setAuthor(buildUser(intruderId))
+                .setParent(comment)
+                .setBody("Same here.")
+                .build();
+        when(commentService.getByPost(postId)).thenReturn(List.of(comment, reply));
+
+        mockMvc.perform(get("/api/comments/post/" + postId).with(asStudent(authorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].parentId").doesNotExist())
+                .andExpect(jsonPath("$[0].reply").value(false))
+                .andExpect(jsonPath("$[1].reply").value(true))
+                .andExpect(jsonPath("$[1].parentId").value(commentId.toString()))
+                // The parent object itself stays off the wire, so a listing cannot nest replies.
+                .andExpect(jsonPath("$[1].parent").doesNotExist());
+    }
+
     private User buildUser(UUID id) {
         return new User.Builder().setId(id).setEmail(id + "@example.com").build();
     }

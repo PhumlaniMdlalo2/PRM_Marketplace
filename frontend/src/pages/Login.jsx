@@ -24,12 +24,25 @@ const Login = () => {
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Where to go once signed in. ProtectedRoute puts the path the user was trying to reach in
+  // location.state.from, so following a link to /cart while signed out does not dump them on the
+  // home page afterwards.
+  //
+  // Only same-site paths are honoured. "//evil.example" also starts with a slash but the browser
+  // reads it as a protocol-relative URL, so a value arriving in router state must never be passed
+  // to navigate unchecked.
+  const attempted = location.state?.from;
+  const destination =
+    typeof attempted === 'string' && attempted.startsWith('/') && !attempted.startsWith('//')
+      ? attempted
+      : '/';
+
   // Someone already signed in has no business on this page. This has to be an effect: navigating
   // during render is not allowed, and returning early would render the redirect page instead of
   // this one for a frame.
   useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (isAuthenticated) navigate(destination, { replace: true });
+  }, [isAuthenticated, destination, navigate]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -57,7 +70,7 @@ const Login = () => {
     setFormError(null);
     try {
       await signIn(formData.email.trim(), formData.password, { persistent: formData.rememberMe });
-      navigate('/', { replace: true });
+      navigate(destination, { replace: true });
     } catch (caught) {
       // The backend answers a wrong email and a wrong password identically on purpose, so there
       // is no way to tell the user which one was wrong without helping whoever is guessing.

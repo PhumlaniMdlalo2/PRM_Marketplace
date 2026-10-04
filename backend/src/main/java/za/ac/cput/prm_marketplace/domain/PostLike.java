@@ -1,7 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonSerialize;
 import jakarta.persistence.*;
+import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -47,6 +50,10 @@ public class PostLike {
         return post;
     }
 
+    /** Serialised through {@link AuthorSummary}, for the same reason a post author is. */
+    @Schema(implementation = AuthorSummary.class)
+
+    @JsonSerialize(using = AuthorSummary.Serializer.class)
     public User getUser() {
         return user;
     }

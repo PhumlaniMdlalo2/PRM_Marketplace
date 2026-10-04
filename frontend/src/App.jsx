@@ -19,6 +19,18 @@ import SavedItems from './pages/SavedItems';
 import CreateListing from './pages/CreateListing';
 import EditListing from './pages/EditListing';
 import NotFound from './pages/NotFound';
+import ProtectedRoute from './auth/ProtectedRoute';
+
+/**
+ * Public routes are the ones the backend serves without a token: browsing the catalogue, reading
+ * the bulletin and its comments, and the auth pages themselves.
+ *
+ * Everything else is wrapped. That list is deliberately not the same as "every route that touches a
+ * user": `/bulletin/:id` reads a thread and is public, but the same page has a comment box that
+ * needs a session, and that check belongs at the point of use rather than at the router. The rule
+ * is that a route is wrapped when *rendering the page at all* is meaningless without an account.
+ */
+const protectedPage = (element) => <ProtectedRoute>{element}</ProtectedRoute>;
 
 function App() {
   return (
@@ -30,19 +42,22 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/verification" element={<Verification />} />
-        <Route path="/messages" element={<Messages />} />
-        <Route path="/messages/:id" element={<Conversation />} />
-        <Route path="/orders" element={<Orders />} />
-        <Route path="/cart" element={<Cart />} />
+
+        <Route path="/messages" element={protectedPage(<Messages />)} />
+        <Route path="/messages/:id" element={protectedPage(<Conversation />)} />
+        <Route path="/orders" element={protectedPage(<Orders />)} />
+        <Route path="/cart" element={protectedPage(<Cart />)} />
+        <Route path="/profile" element={protectedPage(<Profile />)} />
+        <Route path="/profile/edit" element={protectedPage(<EditProfile />)} />
+        <Route path="/settings" element={protectedPage(<Settings />)} />
+        <Route path="/saved" element={protectedPage(<SavedItems />)} />
+        <Route path="/listing/create" element={protectedPage(<CreateListing />)} />
+        <Route path="/listing/edit/:id" element={protectedPage(<EditListing />)} />
+
         <Route path="/bulletin" element={<Bulletin />} />
-        <Route path="/bulletin/create" element={<CreatePost />} />
+        <Route path="/bulletin/create" element={protectedPage(<CreatePost />)} />
         <Route path="/bulletin/:id" element={<PostComments />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/profile/edit" element={<EditProfile />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/saved" element={<SavedItems />} />
-        <Route path="/listing/create" element={<CreateListing />} />
-        <Route path="/listing/edit/:id" element={<EditListing />} />
+
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Router>

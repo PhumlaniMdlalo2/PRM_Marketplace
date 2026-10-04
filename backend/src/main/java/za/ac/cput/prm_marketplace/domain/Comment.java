@@ -1,7 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import jakarta.persistence.*;
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonSerialize;
+import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -35,6 +38,11 @@ public class Comment {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private User author;
 
+    /**
+     * Accepted on input, hidden from output: the parent is a comment, and serialising it would nest
+     * a whole reply tree inside every comment in a listing. A client still has to know which comment
+     * a reply belongs to, so {@link #getParentId()} puts just that id back on the wire.
+     */
     @ManyToOne
     @JoinColumn(name = "parent_id")
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
@@ -67,12 +75,27 @@ public class Comment {
         return post;
     }
 
+    /** Serialised through {@link AuthorSummary}: a reader gets a name, not a contact list. */
+    @Schema(implementation = AuthorSummary.class)
+
+    @JsonSerialize(using = AuthorSummary.Serializer.class)
     public User getAuthor() {
         return author;
     }
 
     public Comment getParent() {
         return parent;
+    }
+
+    /**
+     * The id of the comment this one replies to, or null when it is a top-level comment.
+     *
+     * <p>{@code parent} itself stays write-only, so this is the only trace of the relationship on the
+     * way out. It is what lets a client rebuild the thread it is about to render.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public UUID getParentId() {
+        return parent == null ? null : parent.getId();
     }
 
     public String getBody() {

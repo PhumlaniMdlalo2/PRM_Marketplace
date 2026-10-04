@@ -1,7 +1,10 @@
 package za.ac.cput.prm_marketplace.domain;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonSerialize;
 import jakarta.persistence.*;
+import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -66,6 +69,13 @@ public class BulletinPost {
         return id;
     }
 
+    /**
+     * Serialised through {@link AuthorSummary} so a post reader gets the author's name and avatar
+     * without also getting the author's email, phone and role.
+     */
+    @Schema(implementation = AuthorSummary.class)
+
+    @JsonSerialize(using = AuthorSummary.Serializer.class)
     public User getAuthor() {
         return author;
     }

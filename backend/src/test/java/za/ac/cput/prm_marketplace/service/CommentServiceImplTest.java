@@ -268,8 +268,8 @@ class CommentServiceImplTest {
         Comment reply = buildComment(parentId, intruderId, null);
         Comment nested = buildComment(UUID.randomUUID(), intruderId, null);
         when(commentRepository.findById(commentId)).thenReturn(Optional.of(root));
-        when(commentRepository.findByParentId(commentId)).thenReturn(List.of(reply));
-        when(commentRepository.findByParentId(parentId)).thenReturn(List.of(nested));
+        when(commentRepository.findByParent_Id(commentId)).thenReturn(List.of(reply));
+        when(commentRepository.findByParent_Id(parentId)).thenReturn(List.of(nested));
         post = postWithCounts(3, 0);
         when(bulletinPostRepository.findById(postId)).thenReturn(Optional.of(post));
 
@@ -320,9 +320,9 @@ class CommentServiceImplTest {
     @DisplayName("thread listings are scoped by post and reject a null id")
     void threadListings_areScoped() {
         Comment stored = buildComment(commentId, authorId, null);
-        when(commentRepository.findByPostIdOrderByCreatedAtAsc(postId)).thenReturn(List.of(stored));
-        when(commentRepository.findByPostIdAndParentIsNullOrderByCreatedAtAsc(postId)).thenReturn(List.of(stored));
-        when(commentRepository.findByPostIdAndParentIdOrderByCreatedAtAsc(postId, commentId)).thenReturn(List.of());
+        when(commentRepository.findByPost_IdOrderByCreatedAtAsc(postId)).thenReturn(List.of(stored));
+        when(commentRepository.findByPost_IdAndParentIsNullOrderByCreatedAtAsc(postId)).thenReturn(List.of(stored));
+        when(commentRepository.findByPost_IdAndParent_IdOrderByCreatedAtAsc(postId, commentId)).thenReturn(List.of());
 
         assertThat(service.getByPost(postId)).containsExactly(stored);
         assertThat(service.getTopLevelByPost(postId)).containsExactly(stored);
@@ -337,8 +337,8 @@ class CommentServiceImplTest {
     @DisplayName("getByAuthor and countByPost scope to their argument and reject null")
     void authorAndCountViews_areScoped() {
         Comment stored = buildComment(commentId, authorId, null);
-        when(commentRepository.findByAuthorIdOrderByCreatedAtDesc(authorId)).thenReturn(List.of(stored));
-        when(commentRepository.countByPostId(postId)).thenReturn(4L);
+        when(commentRepository.findByAuthor_IdOrderByCreatedAtDesc(authorId)).thenReturn(List.of(stored));
+        when(commentRepository.countByPost_Id(postId)).thenReturn(4L);
 
         assertThat(service.getByAuthor(authorId)).containsExactly(stored);
         assertThat(service.getByAuthor(null)).isEmpty();
