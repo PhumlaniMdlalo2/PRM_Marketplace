@@ -38,6 +38,19 @@ public interface IVendorProfileService {
      */
     VendorProfile update(UUID id, VendorProfile profile, UUID requesterId);
 
+    /**
+     * Sets or clears a seller's verified badge. Faculty only.
+     *
+     * <p>This is the only path that can move the flag. {@code create} hard-codes it false and
+     * {@code update} carries the stored value over, so before this method existed nothing could set it
+     * true and the badge the listing page renders was permanently unreachable.
+     *
+     * <p>Requires FACULTY for the same reason report resolution does: verification is a judgement
+     * about a business, and it is not the seller's to grant themselves. Returns null for any other
+     * role, and null for a profile that does not exist.
+     */
+    VendorProfile verify(UUID id, boolean verified, UUID requesterId, Role requesterRole);
+
     /** The public seller directory. */
     List<VendorProfile> getAll();
 

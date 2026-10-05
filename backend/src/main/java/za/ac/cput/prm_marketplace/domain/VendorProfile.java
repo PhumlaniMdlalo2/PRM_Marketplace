@@ -53,6 +53,15 @@ public class VendorProfile {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private BigDecimal ratingAvg;
 
+    /**
+     * How many reviews {@link #ratingAvg} summarises.
+     *
+     * <p>Maintained by {@code VendorRatingService}, and read-only over JSON for the same reason
+     * {@code ratingAvg} is: a count the client can set is a count that will be wrong.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private int ratingCount;
+
     @Column(updatable = false)
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime createdAt;
@@ -68,6 +77,7 @@ public class VendorProfile {
         this.registrationNo = builder.registrationNo;
         this.verified = builder.verified;
         this.ratingAvg = builder.ratingAvg;
+        this.ratingCount = builder.ratingCount;
         this.createdAt = builder.createdAt;
     }
 
@@ -113,6 +123,17 @@ public class VendorProfile {
         return ratingAvg;
     }
 
+    /**
+     * How many reviews the average is drawn from.
+     *
+     * <p>Never trust {@code ratingAvg} without it. A single five-star review and fifty of them
+     * produce the same number, and the listing page shows both as "4.8" — so this is what tells a
+     * reader whether the average has any weight behind it.
+     */
+    public int getRatingCount() {
+        return ratingCount;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -126,6 +147,7 @@ public class VendorProfile {
                 ", registrationNo='" + registrationNo + '\'' +
                 ", verified=" + verified +
                 ", ratingAvg=" + ratingAvg +
+                ", ratingCount=" + ratingCount +
                 ", createdAt=" + createdAt +
                 '}';
     }
@@ -135,8 +157,9 @@ public class VendorProfile {
         private User user;
         private String businessName;
         private String registrationNo;
-        private boolean verified;
+private boolean verified;
         private BigDecimal ratingAvg;
+        private int ratingCount;
         private LocalDateTime createdAt;
 
         public Builder setId(UUID id) {
@@ -169,6 +192,11 @@ public class VendorProfile {
             return this;
         }
 
+        public Builder setRatingCount(int ratingCount) {
+            this.ratingCount = ratingCount;
+            return this;
+        }
+
         public Builder setCreatedAt(LocalDateTime createdAt) {
             this.createdAt = createdAt;
             return this;
@@ -181,6 +209,9 @@ public class VendorProfile {
             this.registrationNo = vendorProfile.registrationNo;
             this.verified = vendorProfile.verified;
             this.ratingAvg = vendorProfile.ratingAvg;
+            // Copied rather than reset: this is the one path that must not drop it, since every
+            // write to a profile rebuilds the entity from the stored row.
+            this.ratingCount = vendorProfile.ratingCount;
             this.createdAt = vendorProfile.createdAt;
             return this;
         }

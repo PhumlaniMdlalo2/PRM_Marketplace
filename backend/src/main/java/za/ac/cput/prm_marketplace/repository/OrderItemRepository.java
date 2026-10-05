@@ -51,4 +51,31 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             """)
     boolean existsByOrderIdAndVendorUserId(@Param("orderId") UUID orderId,
                                            @Param("vendorUserId") UUID vendorUserId);
+
+    /**
+     * True when this buyer has actually bought this product.
+     *
+     * <p>Reviews are the marketplace's trust signal, so a review from somebody who never bought the
+     * thing says nothing about the seller. Without this, any authenticated account can review any
+     * listing and the average rating is worth nothing.
+     *
+     * <p>CANCELLED and REFUNDED are excluded on purpose. Both mean the money went back: a cancelled
+     * order had its stock returned to the catalogue, and a refunded one was returned to the buyer.
+     * Either way there is no longer a purchase, and a review left behind would keep claiming there
+     * is. PENDING through DELIVERED all count, so a buyer can review as soon as checkout completes
+     * rather than having to wait for delivery.
+     *
+     * <p>As with the vendor check above, the whole ownership chain is walked in the database rather
+     * than by loading the graph in Java.
+     */
+    @Query("""
+            select count(oi) > 0
+            from OrderItem oi
+            where oi.product.id = :productId
+              and oi.order.buyer.id = :buyerId
+              and oi.order.status not in (za.ac.cput.prm_marketplace.domain.OrderStatus.CANCELLED,
+                                          za.ac.cput.prm_marketplace.domain.OrderStatus.REFUNDED)
+            """)
+    boolean existsByProductIdAndBuyerId(@Param("productId") UUID productId,
+                                        @Param("buyerId") UUID buyerId);
 }

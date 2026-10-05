@@ -333,6 +333,117 @@ class VendorProfileServiceImplTest {
                 .isEqualTo("Acme Repairs");
     }
 
+    // verify
+
+    @Test
+    @DisplayName("verify grants the badge for faculty")
+    void verifyGrantsTheBadgeForFaculty() {
+        UUID id = UUID.randomUUID();
+        VendorProfile unverified = new VendorProfile.Builder()
+                .setId(id)
+                .setUser(seller)
+                .setBusinessName("Acme Repairs")
+                .setVerified(false)
+                .build();
+        when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(unverified));
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+
+        // The flag could not be set by any other route, so before this method existed the badge the
+        // listing page renders was permanently unreachable for everyone.
+        assertThat(result.isVerified()).isTrue();
+    }
+
+    @Test
+    @DisplayName("verify withdraws the badge when faculty say so")
+    void verifyWithdrawsTheBadge() {
+        UUID id = UUID.randomUUID();
+        when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(stored()));
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        // Withdrawal has to work, or a revoked seller stays marked trusted on every listing forever.
+        assertThat(vendorProfileService.verify(id, false, UUID.randomUUID(), Role.FACULTY).isVerified())
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("verify carries the rating through untouched")
+    void verifyLeavesTheRatingAlone() {
+        UUID id = UUID.randomUUID();
+        // Unverified, so this actually goes through the write rather than short-circuiting on an
+        // already-correct flag.
+        VendorProfile ratedButUnverified = new VendorProfile.Builder()
+                .setId(id)
+                .setUser(seller)
+                .setBusinessName("Acme Repairs")
+                .setRatingAvg(new BigDecimal("4.50"))
+                .setRatingCount(7)
+                .build();
+        when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(ratedButUnverified));
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+
+        // Verification and reputation are separate signals. Rebuilding the row here without copying
+        // the rating would erase a seller's score for everyone who has reviewed them.
+        assertThat(result.getRatingAvg()).isEqualByComparingTo("4.50");
+        assertThat(result.getRatingCount()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("verify refuses a seller marking themselves trusted")
+    void verifyRefusesAVendor() {
+        UUID id = UUID.randomUUID();
+
+        assertThat(vendorProfileService.verify(id, true, sellerId, Role.VENDOR)).isNull();
+        assertThat(vendorProfileService.verify(id, true, sellerId, Role.STUDENT)).isNull();
+
+        // Nothing is even read, so this cannot be used to find out which profiles exist.
+        verifyNoInteractions(vendorProfileRepository);
+    }
+
+    @Test
+    @DisplayName("verify refuses a caller with no role, rather than defaulting to allowed")
+    void verifyRefusesAMissingRole() {
+        assertThat(vendorProfileService.verify(UUID.randomUUID(), true, sellerId, null)).isNull();
+
+        verifyNoInteractions(vendorProfileRepository);
+    }
+
+    @Test
+    @DisplayName("verify returns null for a profile that does not exist")
+    void verifyReturnsNullForAMissingProfile() {
+        UUID id = UUID.randomUUID();
+        when(vendorProfileRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThat(vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY)).isNull();
+    }
+
+    @Test
+    @DisplayName("verify on an unchanged profile writes nothing")
+    void verifyDoesNotWriteWhenAlreadyInThatState() {
+        UUID id = UUID.randomUUID();
+        when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(stored()));
+
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+
+        assertThat(result.isVerified()).isTrue();
+        // A repeat call is idempotent rather than a pointless write.
+        verify(vendorProfileRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("verify ignores a null id")
+    void verifyIgnoresANullId() {
+        assertThat(vendorProfileService.verify(null, true, UUID.randomUUID(), Role.FACULTY)).isNull();
+
+        verifyNoInteractions(vendorProfileRepository);
+    }
+
     // getAll / findMine
 
     @Test

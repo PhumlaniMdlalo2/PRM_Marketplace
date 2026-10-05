@@ -99,6 +99,33 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
     }
 
     @Override
+    @Transactional
+    public VendorProfile verify(UUID id, boolean verified, UUID requesterId, Role requesterRole) {
+        // Checked before anything is read, so a non-moderator gets the same answer whether or not
+        // the profile exists and cannot use this to probe the seller directory.
+        if (requesterRole != Role.FACULTY || id == null) {
+            return null;
+        }
+
+        VendorProfile existing = vendorProfileRepository.findById(id).orElse(null);
+        if (existing == null) {
+            return null;
+        }
+        if (existing.isVerified() == verified) {
+            // Nothing to do. Returning the stored row avoids a pointless write, and makes a repeat
+            // call idempotent rather than bumping updatedAt on a table that has no such column.
+            return existing;
+        }
+
+        // The rating is carried over untouched. Verification and reputation are separate signals and
+        // conflating them would mean verifying a seller silently rewrote their score.
+        return vendorProfileRepository.save(new VendorProfile.Builder()
+                .copy(existing)
+                .setVerified(verified)
+                .build());
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public List<VendorProfile> getAll() {
         return vendorProfileRepository.findAll();

@@ -25,10 +25,15 @@ public class ReviewController {
         this.reviewService = reviewService;
     }
 
-    /**
-     * Writes a review as the caller. The reviewer used to be read from the body, so a review could
-     * be attributed to another account.
-     */
+/**
+ * Writes a review as the caller. The reviewer used to be read from the body, so a review could
+ * be attributed to another account.
+ *
+ * <p>The service additionally requires that the caller actually bought the product, and that the
+ * comment fits {@code reviews.comment varchar(255) not null}. A submission failing either check is
+ * reported as not found rather than as a server error, because both are ordinary client input
+ * problems and the previous behaviour of letting them reach the database returned a 500.
+ */
     @PostMapping
     public ResponseEntity<Review> create(@RequestBody Review review, Authentication authentication) {
         Review created = reviewService.create(review, CurrentCaller.id(authentication));

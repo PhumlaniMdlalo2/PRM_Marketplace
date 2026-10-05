@@ -8,13 +8,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.repository.ReviewRepository;
+import za.ac.cput.prm_marketplace.service.VendorRatingService;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,6 +75,12 @@ class FlywayBaselineOnFreshDatabaseTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private ReviewRepository reviewRepository;
+
+    @Autowired
+    private VendorRatingService vendorRatingService;
+
     @Test
     @DisplayName("V1 creates every table the entity model needs on an empty database")
     void v1CreatesSchemaOnEmptyDatabase() {
@@ -104,6 +114,113 @@ class FlywayBaselineOnFreshDatabaseTest {
         } finally {
             em.close();
         }
+    }
+
+    @Test
+    @DisplayName("the vendor rating aggregate runs on MySQL and stores the average and count")
+    void vendorRatingAggregateRunsOnMysql() {
+        // The rest of the suite runs on H2, which accepts a good deal of JPQL that MySQL rejects, and
+        // this is the only query in the review code that reaches through two tables and aggregates.
+        // It was written without ever being executed, so this is where it gets found out.
+        UUID vendorId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID reviewerOne = UUID.randomUUID();
+        UUID reviewerTwo = UUID.randomUUID();
+        UUID firstProduct = UUID.randomUUID();
+        UUID secondProduct = UUID.randomUUID();
+
+        jdbcTemplate.update("insert into users (id, email, name, password_hash, verified) values (?, ?, ?, ?, true)",
+                uuid(ownerId), "owner@example.ac.za", "Owner", "hash");
+        // Reviews reference their author, so both reviewers need an account of their own.
+        for (UUID reviewer : new UUID[]{reviewerOne, reviewerTwo}) {
+            jdbcTemplate.update("insert into users (id, email, name, password_hash, verified) values (?, ?, ?, ?, true)",
+                    uuid(reviewer), UUID.randomUUID() + "@example.ac.za", "Reviewer", "hash");
+        }
+        jdbcTemplate.update(
+                "insert into vendor_profiles (id, user_id, business_name, verified, created_at) values (?, ?, ?, ?, now(6))",
+                uuid(vendorId), uuid(ownerId), "Acme Repairs", false);
+        for (UUID product : new UUID[]{firstProduct, secondProduct}) {
+            jdbcTemplate.update(
+                    "insert into products (id, vendor_id, name, price, stock_quantity, active) values (?, ?, ?, 1.00, 1, true)",
+                    uuid(product), uuid(vendorId), "A listing");
+        }
+        // 5 and 4 across two listings, so the join has to span products rather than one.
+        jdbcTemplate.update("insert into reviews (id, product_id, reviewer_id, rating, comment) values (?, ?, ?, 5, 'Great')",
+                uuid(UUID.randomUUID()), uuid(firstProduct), uuid(reviewerOne));
+        jdbcTemplate.update("insert into reviews (id, product_id, reviewer_id, rating, comment) values (?, ?, ?, 4, 'Fine')",
+                uuid(UUID.randomUUID()), uuid(secondProduct), uuid(reviewerTwo));
+
+        Double average = reviewRepository.averageRatingForVendor(vendorId);
+        long count = reviewRepository.reviewCountForVendor(vendorId);
+
+        assertThat(count).isEqualTo(2L);
+        assertThat(average).isEqualTo(4.5d);
+
+        vendorRatingService.refresh(vendorId);
+
+        BigDecimal storedAvg = jdbcTemplate.queryForObject(
+                "select rating_avg from vendor_profiles where id = ?", BigDecimal.class, uuid(vendorId));
+        Integer storedCount = jdbcTemplate.queryForObject(
+                "select rating_count from vendor_profiles where id = ?", Integer.class, uuid(vendorId));
+        assertThat(storedAvg).isEqualByComparingTo("4.50");
+        assertThat(storedCount).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("the last review being removed takes the stored average back to null")
+    void removingTheLastReviewClearsTheAverageOnMysql() {
+        // Incremental averaging cannot do this correctly. It is the reason the whole number is
+        // recalculated rather than adjusted, so it is worth proving the recalculation reaches the
+        // database and not just a mocked repository.
+        UUID vendorId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+
+        jdbcTemplate.update("insert into users (id, email, name, password_hash, verified) values (?, ?, ?, ?, true)",
+                uuid(ownerId), "owner2@example.ac.za", "Owner", "hash");
+        jdbcTemplate.update("insert into users (id, email, name, password_hash, verified) values (?, ?, ?, ?, true)",
+                uuid(reviewerId), "buyer2@example.ac.za", "Buyer", "hash");
+        jdbcTemplate.update(
+                "insert into vendor_profiles (id, user_id, business_name, verified, created_at) values (?, ?, ?, ?, now(6))",
+                uuid(vendorId), uuid(ownerId), "Acme Repairs", false);
+        jdbcTemplate.update(
+                "insert into products (id, vendor_id, name, price, stock_quantity, active) values (?, ?, ?, 1.00, 1, true)",
+                uuid(productId), uuid(vendorId), "A listing");
+        jdbcTemplate.update("insert into reviews (id, product_id, reviewer_id, rating, comment) values (?, ?, ?, 5, 'Great')",
+                uuid(reviewId), uuid(productId), uuid(reviewerId));
+
+        vendorRatingService.refresh(vendorId);
+        assertThat(jdbcTemplate.queryForObject(
+                "select rating_count from vendor_profiles where id = ?", Integer.class, uuid(vendorId)))
+                .isEqualTo(1);
+
+        jdbcTemplate.update("delete from reviews where id = ?", uuid(reviewId));
+        vendorRatingService.refresh(vendorId);
+
+        // A stale 5.00 here would mean a seller nobody has reviewed is still shown as perfect.
+        assertThat(jdbcTemplate.queryForObject(
+                "select rating_avg from vendor_profiles where id = ?", BigDecimal.class, uuid(vendorId))).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "select rating_count from vendor_profiles where id = ?", Integer.class, uuid(vendorId)))
+                .isZero();
+    }
+
+    /** The id column is {@code binary(16)}, so the raw bytes go in rather than the formatted UUID. */
+    private static byte[] uuid(UUID id) {
+        return toBytes(id);
+    }
+
+    private static byte[] toBytes(UUID id) {
+        byte[] bytes = new byte[16];
+        long high = id.getMostSignificantBits();
+        long low = id.getLeastSignificantBits();
+        for (int i = 0; i < 8; i++) {
+            bytes[i] = (byte) (high >>> (8 * (7 - i)));
+            bytes[8 + i] = (byte) (low >>> (8 * (7 - i)));
+        }
+        return bytes;
     }
 
     /**

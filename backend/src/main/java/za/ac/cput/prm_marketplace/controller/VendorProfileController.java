@@ -66,6 +66,32 @@ public class VendorProfileController {
         return ResponseEntity.ok(updated);
     }
 
+    /**
+     * Grants or withdraws a seller's verified badge. Faculty only.
+     *
+     * <p>Separate from {@code PUT /{id}} on purpose. That endpoint rebuilds the profile from the
+     * stored row and carries the verified flag over, so it cannot be used to grant verification even
+     * though it accepts the whole entity in the body — mixing the two would have meant trusting the
+     * body's {@code verified} field, which is exactly how a seller would mark themselves trusted.
+     *
+     * <p>The decision arrives as a parameter rather than a body field so that "no value" cannot be
+     * confused with "false": the request always states which way it is going.
+     *
+     * <p>Anything other than faculty is reported as not found, matching report resolution, so this
+     * cannot be used to find out whether a given profile exists.
+     */
+    @PatchMapping("/{id}/verification")
+    public ResponseEntity<VendorProfile> verify(@PathVariable UUID id,
+                                                @RequestParam boolean verified,
+                                                Authentication authentication) {
+        VendorProfile updated = vendorProfileService.verify(id, verified,
+                CurrentCaller.id(authentication), CurrentCaller.role(authentication));
+        if (updated == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(updated);
+    }
+
     /** The public seller directory. */
     @GetMapping
     public ResponseEntity<List<VendorProfile>> getAll() {

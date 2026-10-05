@@ -1170,6 +1170,14 @@
             "type" : "string",
             "format" : "uuid"
           }
+        }, {
+          "name" : "paymentMethod",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "CARD", "EFT", "WALLET" ]
+          }
         } ],
         "responses" : {
           "200" : {
@@ -1196,6 +1204,14 @@
           "schema" : {
             "type" : "string",
             "format" : "uuid"
+          }
+        }, {
+          "name" : "paymentMethod",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "CARD", "EFT", "WALLET" ]
           }
         } ],
         "responses" : {
@@ -1674,6 +1690,40 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/Address"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vendor-profiles/{id}/verification" : {
+      "patch" : {
+        "tags" : [ "vendor-profile-controller" ],
+        "operationId" : "verify_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "verified",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "boolean"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendorProfile"
                 }
               }
             }
@@ -3323,6 +3373,11 @@
           },
           "ratingAvg" : {
             "type" : "number",
+            "readOnly" : true
+          },
+          "ratingCount" : {
+            "type" : "integer",
+            "format" : "int32",
             "readOnly" : true
           },
           "createdAt" : {

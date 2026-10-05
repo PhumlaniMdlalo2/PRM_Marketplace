@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.http.MediaType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asFaculty;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
 /**
@@ -268,6 +270,84 @@ class VendorProfileControllerTest {
                 .andExpect(status().isMethodNotAllowed());
 
         verifyNoInteractions(vendorProfileService);
+    }
+
+    // verify
+
+    @Test
+    @DisplayName("faculty can grant the badge and the service is given their role")
+    void verify_grantsTheBadge() throws Exception {
+        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY)))
+                .thenReturn(buildProfile(profileId));
+
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .param("verified", "true")
+                        .with(asFaculty(intruderId)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("faculty can withdraw the badge")
+    void verify_withdrawsTheBadge() throws Exception {
+        when(vendorProfileService.verify(eq(profileId), eq(false), any(), eq(Role.FACULTY)))
+                .thenReturn(buildProfile(profileId));
+
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .param("verified", "false")
+                        .with(asFaculty(intruderId)))
+                .andExpect(status().isOk());
+
+        // Both directions have to be reachable, or a revoked seller stays marked trusted forever.
+        verify(vendorProfileService).verify(eq(profileId), eq(false), eq(intruderId), eq(Role.FACULTY));
+    }
+
+    @Test
+    @DisplayName("a seller granting themselves the badge reads as not found")
+    void verify_refusesAVendor() throws Exception {
+        when(vendorProfileService.verify(eq(profileId), eq(true), eq(sellerId), eq(Role.VENDOR)))
+                .thenReturn(null);
+
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .param("verified", "true")
+                        .with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot reach verification")
+    void verify_refusesAnonymous() throws Exception {
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .param("verified", "true"))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    @DisplayName("verification with no decision at all is refused rather than read as false")
+    void verify_requiresAnExplicitDecision() throws Exception {
+        // The decision is a query parameter, not a body field, precisely so that omitting it cannot
+        // be mistaken for "withdraw the badge".
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .with(asFaculty(intruderId)))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    @DisplayName("the request body cannot override the verification decision")
+    void verify_ignoresAnyBody() throws Exception {
+        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY)))
+                .thenReturn(buildProfile(profileId));
+
+        mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
+                        .param("verified", "true")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new VendorProfile.Builder().setVerified(false).build()))
+                        .with(asFaculty(intruderId)))
+                .andExpect(status().isOk());
+
+        // Only the parameter counts. Keeping the body ignored is what stops "verified" from being a
+        // field a caller can smuggle in through some other shape of the request.
+        verify(vendorProfileService).verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY));
     }
 
     // getAll
