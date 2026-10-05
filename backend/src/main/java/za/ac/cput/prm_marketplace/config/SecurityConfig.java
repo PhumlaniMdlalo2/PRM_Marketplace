@@ -77,6 +77,17 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // "My own" routes are named before the public catalogue wildcards below,
+                        // because Spring Security takes the first matcher that fits and
+                        // "/api/products/**" would otherwise swallow these. They used to be covered
+                        // by that wildcard and so did not need a token from the filter chain: they
+                        // only answered 401 because the controller happened to ask CurrentCaller who
+                        // was calling. A new method on either controller that forgot to would have
+                        // been an unauthenticated read of caller-scoped data with nothing to catch it.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/products/mine",
+                                "/api/vendor-profiles/me")
+                        .authenticated()
                         // Only the endpoints that must work before a caller has a token. Note that
                         // change-password is deliberately absent: it requires an authenticated caller.
                         .requestMatchers(
@@ -89,6 +100,12 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
+                                // The health probes. They report up or down and nothing else, so they
+                                // need no token: an orchestrator asking "is this up?" should not have
+                                // to hold a credential to be told no. The sub-paths are the liveness
+                                // and readiness groups, which is where a probe should actually point.
+                                "/actuator/health",
+                                "/actuator/health/**",
                                 "/error")
                         .permitAll()
                         // Browsing the catalogue and the seller directory is public; only writes
@@ -136,7 +153,19 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
-            @Value("${app.cors.allowed-origins:http://localhost:5173}") List<String> allowedOrigins) {
+            @Value("${app.cors.allowed-origins}") List<String> allowedOrigins) {
+        // No default here on purpose. application.properties already supplies one, so the property is
+        // always present; repeating it as an @Value fallback meant the two could drift apart, and they
+        // had: the fallback named only port 5173 while the properties file also allowed 3000. Anything
+        // genuinely missing now fails here rather than silently allowing one origin and not the other.
+        if (allowedOrigins == null || allowedOrigins.isEmpty()
+                || allowedOrigins.stream().anyMatch(String::isBlank)) {
+            throw new IllegalStateException(
+                    "app.cors.allowed-origins is empty. Set CORS_ALLOWED_ORIGINS to the origins that may "
+                            + "call this API, comma separated. An empty list is refused rather than "
+                            + "accepted because the symptom otherwise only appears once the frontend "
+                            + "starts making requests and every one of them is rejected.");
+        }
         if (allowedOrigins.stream().anyMatch(origin -> origin.contains("*"))) {
             throw new IllegalStateException(
                     "app.cors.allowed-origins must list explicit origins. Credentials are allowed, so a "

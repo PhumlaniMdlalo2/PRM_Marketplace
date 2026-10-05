@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -153,6 +154,95 @@ class SecurityConfigTest {
 
         mockMvc.perform(get("/api/users/me").header("Authorization", foreign))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("a caller's own listings require authentication, not just a controller check")
+    void myListings_requireAuthentication() throws Exception {
+        // "/api/products/**" is a public GET matcher, so this route sat inside it and never asked the
+        // filter chain for a token. It answered 401 anyway because the controller asked CurrentCaller
+        // who was calling, which means the only thing standing between this route and an anonymous
+        // read of one seller's stock was every future method remembering to make that call.
+        mockMvc.perform(get("/api/products/mine"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("a caller's own seller profile requires authentication")
+    void myVendorProfile_requiresAuthentication() throws Exception {
+        // Same shape of problem as above, on the other prefix that "/**" covers.
+        mockMvc.perform(get("/api/vendor-profiles/me"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("the seller directory stays readable without a token")
+    void publicVendorReads_stayPublic() throws Exception {
+        // Narrowing "me" must not have narrowed the directory it is served from.
+        mockMvc.perform(get("/api/vendor-profiles"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("the liveness probe answers without a token and reports nothing else")
+    void liveness_isPublicAndSaysNothingMoreThanUp() throws Exception {
+        mockMvc.perform(get("/actuator/health/liveness"))
+                .andExpect(status().isOk())
+                // A probe that leaked the database URL, the build version or the bean list would be
+                // handing a map of the deployment to anyone who asked.
+                .andExpect(content().string("{\"status\":\"UP\"}"));
+    }
+
+    @Test
+    @DisplayName("an unreachable mail server shows up in readiness instead of failing liveness")
+    void readiness_reportsUnreachableMail() throws Exception {
+        // Nothing is listening on the test mail port, and until health existed that was invisible:
+        // sends were logged and swallowed, the request still returned success, and the only way to
+        // claim a bootstrapped faculty account was an email that never arrived.
+        mockMvc.perform(get("/actuator/health/readiness"))
+                .andExpect(status().isServiceUnavailable());
+
+        // Liveness must stay up regardless. An orchestrator probing this path should not restart a
+        // working process because a mail server is down; restarting would not fix mail.
+        mockMvc.perform(get("/actuator/health/liveness"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("no other actuator endpoint is exposed")
+    void otherActuatorEndpoints_areNotExposed() throws Exception {
+        // exposure.include is health alone, so these must not exist even to an authenticated caller.
+        // /actuator/env in particular hands over every configuration value, and springdoc already
+        // publishes the API surface.
+        User user = buildUser(UUID.randomUUID());
+        when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/actuator/env").header("Authorization", tokenFor(user)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/actuator/beans").header("Authorization", tokenFor(user)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("an anonymous caller cannot probe the unexposed actuator surface")
+    void otherActuatorEndpoints_areNotReachableAnonymously() throws Exception {
+        // Security runs before routing, so an endpoint that is not exposed still answers 401 rather
+        // than 404 to a caller with no token. Either way nothing is served.
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("CORS preflight from the second dev port is accepted")
+    void corsPreflight_secondDevPort_isAccepted() throws Exception {
+        // Port 3000 is in the default list. It used to be missing from a second copy of that list held
+        // in an @Value fallback, so which of the two governed depended on whether the properties file
+        // was on the classpath. Asserting both ports pins the default rather than restating it.
+        mockMvc.perform(options("/api/users/me")
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk());
     }
 
     @Test
