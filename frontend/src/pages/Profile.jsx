@@ -76,6 +76,10 @@ const Profile = () => {
     { icon: Package, label: 'My orders', path: '/orders', count: data?.orders },
     { icon: Heart, label: 'Saved items', path: '/saved', count: data?.saved },
     { icon: MessageCircle, label: 'Messages', path: '/messages', count: data?.unread },
+    // Only a vendor account has listings to see, so this row is not rendered for anyone else.
+    // Before this the page offered no route to them at all: a seller could create a listing and
+    // then had no way back to it.
+    ...(isVendor ? [{ icon: Store, label: 'My listings', path: '/listing/mine' }] : []),
   ];
 
   const badge = (text, primary = false) => (

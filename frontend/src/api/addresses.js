@@ -20,6 +20,19 @@ export const createAddress = async (address) => {
   return response.data;
 };
 
+/**
+ * Edits a saved address.
+ *
+ * The whole address is sent rather than just the changed fields, because `Address.defaultAddress`
+ * is a primitive boolean on the entity: a body that omits it arrives as false and would silently
+ * unset the default. Callers should spread the stored address and overwrite what changed, which is
+ * what the settings panel does.
+ */
+export const updateAddress = async (id, address) => {
+  const response = await api.put(`/addresses/${id}`, address);
+  return response.data;
+};
+
 export const deleteAddress = async (id) => {
   await api.delete(`/addresses/${id}`);
 };

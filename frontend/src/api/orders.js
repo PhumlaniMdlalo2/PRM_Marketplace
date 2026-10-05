@@ -4,9 +4,10 @@ import { api } from './client';
  * Orders.
  *
  * Placement is server-driven: `checkoutCart` sends no line items, no prices and no buyer. The
- * server reads the cart it already holds, prices it, reserves stock and empties the cart, so the
- * totals a user sees afterwards are the totals they are charged. The only thing a client chooses is
- * which of their own addresses to ship to, and the server checks they own it.
+ * server reads the cart it already holds, prices it, reserves stock, files the payment and empties
+ * the cart, so the totals a user sees afterwards are the totals they are charged. The client chooses
+ * only which of their own addresses to ship to and how they intend to pay; the server checks they
+ * own the address, and decides the amount and the payer.
  */
 
 export const listOrders = async () => {
@@ -26,14 +27,21 @@ export const listOrderItems = async (orderId) => {
 };
 
 /**
- * Turns the stored cart into an order.
+ * Turns the stored cart into an order and files the payment attempt with it.
  *
  * @param {string|null} shippingAddressId one of the caller's own addresses, or null to skip
+ * @param {string|null} paymentMethod 'CARD' | 'EFT' | 'WALLET', the backend enum names. Lowercase
+ *   values are rejected by the enum binding, so these have to match exactly. Omitted means CARD.
  * @returns the placed order, or null when the server declined — an empty cart answers 400
  */
-export const checkoutCart = async (shippingAddressId = null) => {
-  const params = shippingAddressId ? { shippingAddressId } : undefined;
-  const { data } = await api.post('/orders/checkout', null, { params });
+export const checkoutCart = async (shippingAddressId = null, paymentMethod = null) => {
+  const params = {
+    ...(shippingAddressId ? { shippingAddressId } : {}),
+    ...(paymentMethod ? { paymentMethod } : {}),
+  };
+  const { data } = await api.post('/orders/checkout', null, {
+    params: Object.keys(params).length ? params : undefined,
+  });
   return data;
 };
 

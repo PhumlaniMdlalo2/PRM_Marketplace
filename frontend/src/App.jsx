@@ -5,6 +5,8 @@ import ProductDetails from './pages/ProductDetails';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import Verification from './pages/Verification';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Messages from './pages/Messages';
 import Conversation from './pages/Conversation';
 import Orders from './pages/Orders';
@@ -18,6 +20,8 @@ import Settings from './pages/Settings';
 import SavedItems from './pages/SavedItems';
 import CreateListing from './pages/CreateListing';
 import EditListing from './pages/EditListing';
+import MyListings from './pages/MyListings';
+import OrderDetail from './pages/OrderDetail';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './auth/ProtectedRoute';
 
@@ -42,10 +46,16 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/verification" element={<Verification />} />
+        {/* The reset flow is public because the user has lost the credential that would let them
+            authenticate; it is still protected server-side by the single-use, expiring token rather
+            than by a session. */}
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route path="/messages" element={protectedPage(<Messages />)} />
         <Route path="/messages/:id" element={protectedPage(<Conversation />)} />
         <Route path="/orders" element={protectedPage(<Orders />)} />
+        <Route path="/orders/:id" element={protectedPage(<OrderDetail />)} />
         <Route path="/cart" element={protectedPage(<Cart />)} />
         <Route path="/profile" element={protectedPage(<Profile />)} />
         <Route path="/profile/edit" element={protectedPage(<EditProfile />)} />
@@ -53,6 +63,7 @@ function App() {
         <Route path="/saved" element={protectedPage(<SavedItems />)} />
         <Route path="/listing/create" element={protectedPage(<CreateListing />)} />
         <Route path="/listing/edit/:id" element={protectedPage(<EditListing />)} />
+        <Route path="/listing/mine" element={protectedPage(<MyListings />)} />
 
         <Route path="/bulletin" element={<Bulletin />} />
         <Route path="/bulletin/create" element={protectedPage(<CreatePost />)} />

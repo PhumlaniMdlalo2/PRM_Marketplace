@@ -11,7 +11,9 @@ import { useAsync } from '../hooks/useAsync';
 import { useAuth } from '../auth/useAuth';
 import { changePassword } from '../api/auth';
 import { getMyVendorProfile, createVendorProfile, updateVendorProfile } from '../api/vendorProfile';
-import { createAddress, deleteAddress, listAddresses, setDefaultAddress } from '../api/addresses';
+import {
+  createAddress, deleteAddress, listAddresses, setDefaultAddress, updateAddress,
+} from '../api/addresses';
 import { createReport, listMyReports } from '../api/reports';
 
 /**
@@ -236,17 +238,46 @@ const SellerProfilePanel = ({ role }) => {
   );
 };
 
+const EMPTY_ADDRESS = {
+  line1: '', line2: '', suburb: '', city: '', province: '', postalCode: '', country: 'South Africa',
+};
+
 const AddressesPanel = () => {
   const load = useCallback(() => listAddresses(), []);
   const { data: addresses, loading, error: loadError, run } = useAsync(load);
 
-  const [form, setForm] = useState({
-    line1: '', line2: '', suburb: '', city: '', province: '', postalCode: '', country: 'South Africa',
-  });
+  const [form, setForm] = useState(EMPTY_ADDRESS);
+  // The address being edited, or null when the form is adding a new one. Editing in place keeps the
+  // list and the form in the same panel, which is where the user already is.
+  const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const set = (name) => (event) => setForm((f) => ({ ...f, [name]: event.target.value }));
+
+  const startEdit = (address) => {
+    setEditingId(address.id);
+    setError(null);
+    setForm({
+      line1: address.line1 ?? '',
+      line2: address.line2 ?? '',
+      suburb: address.suburb ?? '',
+      city: address.city ?? '',
+      province: address.province ?? '',
+      postalCode: address.postalCode ?? '',
+      // defaultAddress is carried through untouched. It is a primitive boolean on the entity, so
+      // omitting it from the update body would arrive as false and unset the default as a side
+      // effect of editing a street name.
+      country: address.country ?? 'South Africa',
+      defaultAddress: address.defaultAddress ?? false,
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(EMPTY_ADDRESS);
+    setError(null);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -256,10 +287,13 @@ const AddressesPanel = () => {
 
     setBusy(true);
     try {
-      await createAddress({ ...form, defaultAddress: false });
-      setForm({
-        line1: '', line2: '', suburb: '', city: '', province: '', postalCode: '', country: 'South Africa',
-      });
+      if (editingId) {
+        await updateAddress(editingId, form);
+        cancelEdit();
+      } else {
+        await createAddress({ ...form, defaultAddress: false });
+        setForm(EMPTY_ADDRESS);
+      }
       await run();
     } catch (caught) {
       setError(caught.message);
@@ -282,6 +316,8 @@ const AddressesPanel = () => {
     setError(null);
     try {
       await deleteAddress(id);
+      // Editing a row that no longer exists would leave the form pointed at a deleted address.
+      if (editingId === id) cancelEdit();
       await run();
     } catch (caught) {
       setError(caught.message);
@@ -311,6 +347,16 @@ const AddressesPanel = () => {
                   Make default
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => startEdit(address)}
+                aria-pressed={editingId === address.id}
+                className={`text-xs font-medium hover:underline ${
+                  editingId === address.id ? 'text-text-primary' : 'text-primary'
+                }`}
+              >
+                {editingId === address.id ? 'Editing' : 'Edit'}
+              </button>
               <button type="button" onClick={() => remove(address.id)} className="text-xs font-medium text-error hover:underline">
                 Remove
               </button>
@@ -320,7 +366,9 @@ const AddressesPanel = () => {
       </ul>
 
       <form onSubmit={submit} className="space-y-3 pt-2 border-t border-border mt-2" noValidate>
-        <p className="text-sm font-medium text-text-primary">Add an address</p>
+        <p className="text-sm font-medium text-text-primary">
+          {editingId ? 'Edit address' : 'Add an address'}
+        </p>
         <Input label="Street address" name="line1" value={form.line1} onChange={set('line1')} />
         <Input label="Suburb" name="suburb" placeholder="Optional" value={form.suburb} onChange={set('suburb')} />
         <div className="grid grid-cols-2 gap-3">
@@ -329,9 +377,18 @@ const AddressesPanel = () => {
         </div>
         <Input label="Postal code" name="postalCode" value={form.postalCode} onChange={set('postalCode')} />
         <Feedback error={error} />
-        <Button type="submit" variant="secondary" disabled={busy}>
-          {busy ? 'Adding…' : 'Add address'}
-        </Button>
+        <div className="flex gap-2">
+          <Button type="submit" variant="secondary" disabled={busy}>
+            {busy
+              ? 'Saving…'
+              : editingId ? 'Save address' : 'Add address'}
+          </Button>
+          {editingId && (
+            <Button type="button" variant="ghost" onClick={cancelEdit}>
+              Cancel
+            </Button>
+          )}
+        </div>
       </form>
     </Panel>
   );

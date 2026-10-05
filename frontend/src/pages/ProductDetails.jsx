@@ -28,8 +28,9 @@ const ProductDetails = () => {
 
   const product = data;
 
-  // Reviews are a separate endpoint from the product, and there is no vendor review count on
-  // VendorProfile, so the number under the rating is the count of reviews on this listing.
+  // Reviews are a separate endpoint from the product, so they arrive on their own. Used for the
+  // review list further down and as the fallback count for sellers whose profile predates the
+  // vendor-wide count on VendorProfile.
   const { data: reviews } = useAsync(loadReviews);
   const reviewCount = reviews?.length ?? 0;
 
@@ -157,6 +158,13 @@ const ProductDetails = () => {
 
   const rating = product.vendor?.ratingAvg;
   const hasRating = typeof rating === 'number' && rating > 0;
+  // The average behind the badge covers every listing this seller has, not just this one, so it has
+  // to be counted against the seller's own review total. Counting the reviews on this page instead
+  // would pair a five-listing average with a single review and quietly make a busy seller look
+  // thinly reviewed.
+  const vendorReviewCount = product.vendor?.ratingCount;
+  const hasVendorRatingCount = Number.isInteger(vendorReviewCount);
+  const shownReviewCount = hasVendorRatingCount ? vendorReviewCount : reviewCount;
 
   return (
     <Layout showNav={false}>
@@ -241,7 +249,12 @@ const ProductDetails = () => {
                         <span className="text-sm font-medium text-text-primary">
                           {rating.toFixed(1)}
                         </span>
-                        <span className="text-sm text-text-secondary">({reviewCount} reviews)</span>
+                        {/* Falls back to the reviews on this listing when the backend has not sent a
+                            vendor-wide count yet, which is the case for any seller profile written
+                            before that column existed. */}
+                        <span className="text-sm text-text-secondary">
+                          ({shownReviewCount} {shownReviewCount === 1 ? 'review' : 'reviews'})
+                        </span>
                       </div>
                     ) : (
                       <p className="text-xs text-text-muted mt-1">No ratings yet</p>

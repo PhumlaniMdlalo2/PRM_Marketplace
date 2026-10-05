@@ -1,10 +1,10 @@
-import { forwardRef, useState } from 'react';
+import { forwardRef, useId, useState } from 'react';
 import { AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 const Input = forwardRef(({ 
   label, 
   type = 'text', 
-  placeholder, 
+  placeholder,
   error,
   success,
   hint,
@@ -15,6 +15,14 @@ const Input = forwardRef(({
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState(false);
   const isPassword = type === 'password';
+
+  // The label has to point at the input. It used to be a bare <label> sitting next to the field,
+  // which associates it with nothing: clicking it did not focus the input, and a screen reader
+  // announced an unlabelled text box. Since this component renders every field in the app, that was
+  // every form on every page. The id is generated so callers do not have to supply one, but an
+  // explicit id still wins for a caller that needs to point a <label> or aria-describedby at it.
+  const generatedId = useId();
+  const inputId = props.id ?? generatedId;
   
   const borderColor = error 
     ? 'border-error' 
@@ -27,7 +35,7 @@ const Input = forwardRef(({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-text-primary mb-1.5">
+        <label htmlFor={inputId} className="block text-sm font-medium text-text-primary mb-1.5">
           {label}
         </label>
       )}
@@ -39,6 +47,7 @@ const Input = forwardRef(({
         )}
         <input
           ref={ref}
+          id={inputId}
           type={isPassword && showPassword ? 'text' : type}
           placeholder={placeholder}
           onFocus={() => setFocused(true)}

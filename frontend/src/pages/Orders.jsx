@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronRight, PackageOpen } from 'lucide-react';
 import StatusBadge from '../components/ui/StatusBadge';
 import EmptyState from '../components/ui/EmptyState';
-import { PackageOpen } from 'lucide-react';
 import Layout from '../components/layout/Layout';
 import { listOrderItems, listOrders } from '../api/orders';
 import { useAsync } from '../hooks/useAsync';
@@ -125,9 +125,13 @@ const Orders = () => {
             />
           ) : (
             visible.map((order) => (
-              <div
+              /* The whole row is the link to the order's detail page, which is where the line items
+                 and the cancel action live. It was a static div with a chevron on it, which promised
+                 somewhere to go. */
+              <Link
                 key={order.id}
-                className="w-full bg-white border border-border rounded-2xl p-4 flex items-center gap-4 text-left"
+                to={`/orders/${order.id}`}
+                className="w-full bg-white border border-border rounded-2xl p-4 flex items-center gap-4 text-left hover:bg-lavender/40 transition-colors"
               >
                 <span className="w-14 h-14 bg-lavender rounded-xl flex-shrink-0 overflow-hidden">
                   {order.items?.[0]?.product?.imageUrl && (
@@ -154,7 +158,7 @@ const Orders = () => {
                   <StatusBadge status={order.status} />
                   <ChevronRight size={18} className="text-text-muted" aria-hidden="true" />
                 </span>
-              </div>
+              </Link>
             ))
           )}
         </div>

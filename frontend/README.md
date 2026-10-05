@@ -1,16 +1,34 @@
-# React + Vite
+# PRM Marketplace frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite + Tailwind 4 single-page app for the student resale marketplace. It talks to the
+Spring backend through same-origin `/api/...` paths; in development Vite proxies those to
+`VITE_BACKEND_URL` (default `http://localhost:8080`).
 
-Currently, two official plugins are available:
+## Commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm run dev         # dev server
+npm run build       # production build to dist/
+npm run preview     # serve the built bundle
+npm run lint        # oxlint
+npm test            # vitest, single run
+npm run test:watch  # vitest in watch mode
+```
 
-## React Compiler
+## Tests
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Vitest with jsdom. `src/test/setup.js` stubs the axios adapter so no test can reach the network —
+without that, jsdom's relative `/api` URLs fail silently inside `useAsync`'s empty state and the
+suite would pass while asserting nothing.
 
-## Expanding the Oxlint configuration
+`src/test/routes.test.jsx` is a route smoke suite: it mounts every route in `App.jsx` and checks
+that each one renders. It exists because `Home.jsx` once used `forwardRef` without importing it,
+which threw while the module was being evaluated — and since `App.jsx` imports every page eagerly,
+that one missing import took down every route in the app. `npm run build` still succeeded. The
+route suite fails on that exact bug while the build does not, which is the whole reason it is there.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+`src/test/client.test.js` covers token storage, including the "remember me" branch where
+un-ticking the box has to actively remove the localStorage copy.
+
+Browser-level end-to-end testing is not set up. `playwright` is a dev dependency but there is no
+`@playwright/test` runner, no browser install, and no seeded backend to point it at.

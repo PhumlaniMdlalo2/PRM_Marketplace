@@ -1,11 +1,12 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Minus, Plus, Lock, Trash2 } from 'lucide-react';
+import { Minus, Plus, Lock, Trash2, MapPin } from 'lucide-react';
 import Button from '../components/ui/Button';
 import BackButton from '../components/ui/BackButton';
 import Layout from '../components/layout/Layout';
 import { listCartItems, removeCartItem, setCartItemQuantity } from '../api/cart';
 import { checkoutCart } from '../api/orders';
+import { listAddresses } from '../api/addresses';
 import { listAll } from '../api/products';
 import { useAsync } from '../hooks/useAsync';
 import { formatPrice } from '../lib/format';
@@ -33,17 +34,35 @@ const Cart = () => {
 
   const loadCart = useCallback(async () => (await listCartItems()).map(toLine), []);
   const loadSuggestions = useCallback(async () => await listAll(), []);
+  const loadAddresses = useCallback(() => listAddresses(), []);
 
   const { data: lines, loading, error, setData } = useAsync(loadCart);
   // Recommendations are secondary: a failure here must not put an error banner above a working cart.
   const { data: catalogue } = useAsync(loadSuggestions);
+  const { data: addresses, loading: addressesLoading } = useAsync(loadAddresses);
 
   const [busyLine, setBusyLine] = useState(null);
   const [checkoutError, setCheckoutError] = useState(null);
   const [placing, setPlacing] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('card');
+  const [paymentMethod, setPaymentMethod] = useState('CARD');
+  const [chosenAddressId, setChosenAddressId] = useState(null);
 
   const items = lines ?? [];
+  const savedAddresses = addresses ?? [];
+
+  /**
+   * The address actually being shipped to, derived on each render rather than synced into state.
+   *
+   * A choice only sticks while it still names one of the caller's own addresses; deleting the
+   * address you picked falls back to their default, and having no addresses at all leaves nothing
+   * selected. That also means the default lands on screen without an effect writing state after the
+   * first paint.
+   */
+  const shippingAddressId = savedAddresses.some((address) => address.id === chosenAddressId)
+    ? chosenAddressId
+    : (savedAddresses.find((address) => address.defaultAddress) ?? savedAddresses[0])?.id ?? null;
+
+  const hasAddresses = savedAddresses.length > 0;
 
   /**
    * Applies a quantity change to the local list straight away, then reconciles with the response.
@@ -86,10 +105,16 @@ const Cart = () => {
 
   const proceedToCheckout = async () => {
     if (placing || items.length === 0) return;
+    if (!hasAddresses) {
+      setCheckoutError('Add a delivery address before checking out');
+      return;
+    }
     setPlacing(true);
     setCheckoutError(null);
     try {
-      await checkoutCart();
+      // Both values are the caller's own choices. The server reads the cart and the totals itself,
+      // and refuses an address that is not theirs.
+      await checkoutCart(shippingAddressId, paymentMethod);
       navigate('/orders');
     } catch (caught) {
       setCheckoutError(caught.message);
@@ -109,10 +134,12 @@ const Cart = () => {
     .filter((product) => !inCart.has(product.id) && product.active !== false)
     .slice(0, 6);
 
-  const paymentOptions = [
-    { id: 'card', label: 'Credit / debit card' },
-    { id: 'eft', label: 'EFT' },
-    { id: 'wallet', label: 'Digital wallet' },
+  // The ids are the backend's enum names verbatim. Jackson binds PaymentMethod case-sensitively, so
+// a lowercase value here would be rejected with a 400 rather than quietly defaulting.
+const paymentOptions = [
+    { id: 'CARD', label: 'Credit / debit card' },
+    { id: 'EFT', label: 'EFT' },
+    { id: 'WALLET', label: 'Digital wallet' },
   ];
 
   return (
@@ -225,9 +252,62 @@ const Cart = () => {
             )}
 
             <div className="mt-8">
+              <div className="flex items-center gap-2 mb-1">
+                <MapPin size={16} className="text-primary" />
+                <h3 className="font-semibold text-text-primary">Delivery address</h3>
+              </div>
+              <p className="text-xs text-text-muted mb-3">
+                Where the seller should send this order. Manage your addresses in Settings.
+              </p>
+              {addressesLoading ? (
+                <div className="h-16 animate-pulse rounded-2xl bg-lavender" />
+              ) : !hasAddresses ? (
+                <div className="p-4 border border-border rounded-2xl bg-lavender/40">
+                  <p className="text-sm text-text-secondary">
+                    You have no saved addresses. Add one in Settings before checking out.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    className="mt-3"
+                    onClick={() => navigate('/settings')}
+                  >
+                    Add a delivery address
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2.5" role="radiogroup" aria-label="Delivery address">
+                  {savedAddresses.map((address) => (
+                    <label
+                      key={address.id}
+                      className={`flex items-start gap-3 p-4 border rounded-2xl cursor-pointer transition-all duration-200 ${
+                        shippingAddressId === address.id
+                          ? 'border-primary bg-primary-muted shadow-sm shadow-primary/10'
+                          : 'border-border hover:border-lavender-dark hover:bg-lavender/30'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="shipping-address"
+                        checked={shippingAddressId === address.id}
+                        onChange={() => setChosenAddressId(address.id)}
+                        className="w-4 h-4 mt-0.5 text-primary focus:ring-primary accent-primary"
+                      />
+                      <span className="text-sm text-text-primary leading-snug">
+                        {address.singleLine || address.line1}
+                        {address.defaultAddress && (
+                          <span className="ml-2 text-xs font-medium text-primary">Default</span>
+                        )}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8">
               <h3 className="font-semibold text-text-primary mb-1">Payment method</h3>
               <p className="text-xs text-text-muted mb-3">
-                Recorded as your preference. The order is placed against the cart when you continue.
+                A payment is filed against the order when you continue, for the full total shown.
               </p>
               <div className="space-y-2.5">
                 {paymentOptions.map((option) => (
@@ -278,11 +358,20 @@ const Cart = () => {
                 size="lg"
                 className="mt-5"
                 onClick={proceedToCheckout}
-                disabled={placing || items.length === 0}
+                disabled={placing || items.length === 0 || addressesLoading || !hasAddresses}
               >
                 <Lock size={16} />
                 {placing ? 'Placing order…' : `Proceed to buy · ${formatPrice(total)}`}
               </Button>
+
+              {shippingAddressId && (
+                <p className="mt-3 text-xs text-text-muted">
+                  Delivering to{' '}
+                  {savedAddresses.find((a) => a.id === shippingAddressId)?.singleLine
+                    ?? 'your selected address'}
+                  .
+                </p>
+              )}
             </div>
           </div>
         </div>
