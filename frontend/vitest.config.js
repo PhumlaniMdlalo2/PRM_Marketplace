@@ -11,9 +11,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.js'],
-    // Route smoke tests are the point of this suite, not an afterthought, so they are not allowed
-    // to be skipped to make a run look fast.
-    css: false,
+    // Route smoke tests are the point of this suite, not an afterthought, so there is no skip flag
+    // here to turn them off and make a run look fast. The route list in routes.test.jsx is the
+    // contract; a route added to App.jsx belongs in it.
+    css: false, // Tailwind is not compiled for tests; no assertion reads a computed style.
     restoreMocks: true,
   },
 })

@@ -27,6 +27,13 @@ const routes = [
   { path: '/settings', name: 'settings' },
   { path: '/saved', name: 'saved' },
   { path: '/listing/create', name: 'create-listing' },
+  { path: '/listing/edit/1', name: 'edit-listing' },
+  { path: '/listing/mine', name: 'my-listings' },
+  { path: '/profile/edit', name: 'edit-profile' },
+  { path: '/orders/1', name: 'order-detail' },
+  { path: '/bulletin/1', name: 'post-comments' },
+  { path: '/forgot-password', name: 'forgot-password' },
+  { path: '/reset-password', name: 'reset-password' },
 ];
 
 const browser = await chromium.launch();
