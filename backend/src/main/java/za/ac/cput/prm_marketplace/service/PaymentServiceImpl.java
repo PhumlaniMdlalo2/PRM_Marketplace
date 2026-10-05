@@ -144,18 +144,20 @@ public class PaymentServiceImpl implements IPaymentService {
 
     @Override
     @Transactional
-    public Payment updateStatus(UUID id, PaymentStatus status, UUID requesterId, Role requesterRole) {
+public Payment updateStatus(UUID id, PaymentStatus status, UUID requesterId, Role requesterRole) {
         if (id == null || status == null || requesterId == null) {
+            return null;
+        }
+
+        // Authority is checked before the payment is even loaded. A caller with no business settling
+        // this payment gets the same answer whether or not the id exists, and a null role is not
+        // faculty rather than being quietly treated as one.
+        if (requiresFaculty(status) && requesterRole != Role.FACULTY) {
             return null;
         }
 
         Payment existing = paymentRepository.findByIdAndUserId(id, requesterId).orElse(null);
         if (existing == null || !isValidTransition(existing.getStatus(), status)) {
-            return null;
-        }
-
-        if (status == PaymentStatus.REFUNDED && requesterRole != Role.FACULTY) {
-            // Paying money back out is not the payer's decision, even on their own payment.
             return null;
         }
 
@@ -172,6 +174,30 @@ public class PaymentServiceImpl implements IPaymentService {
         Payment saved = paymentRepository.save(updated);
         notifyUser(saved);
         return saved;
+    }
+
+    /**
+     * Whether settling the payment is the business's decision rather than the payer's.
+     *
+     * <p>Settling a payment is the one transition the payer must not make for themselves. The
+     * ownership check already stops a buyer settling somebody else's payment, which left the case
+     * that actually mattered: a buyer PATCHing their own PENDING payment straight to COMPLETED and
+     * then acting on an order they never paid for. Nothing in the request distinguishes "the gateway
+     * confirmed this" from "I am asserting that it did", so the endpoint refuses to take the word of
+     * whoever the money is attached to.
+     *
+     * <p>FAILED is gated alongside COMPLETED deliberately: a buyer who can mark their own attempt as
+     * failed can erase a completed charge they regret, so both directions out of PENDING are closed
+     * together. PENDING is left open to everyone, since retrying your own attempt asserts nothing
+     * about money that has moved. REFUNDED was already faculty-only.
+     *
+     * <p>The consequence is that with no payment gateway wired up, payments sit at PENDING and orders
+     * do not advance on their own. That is the honest state for a marketplace with no processor; the
+     * alternative is a checkout that looks paid and is not. A gateway callback that calls this same
+     * method with faculty authority replaces the manual step without any other change here.
+     */
+    private static boolean requiresFaculty(PaymentStatus status) {
+        return status != PaymentStatus.PENDING;
     }
 
     private static boolean isValidTransition(PaymentStatus from, PaymentStatus to) {

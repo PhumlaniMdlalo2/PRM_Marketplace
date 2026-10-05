@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.security.UserPrincipal;
@@ -118,7 +119,7 @@ class OrderControllerTest {
     @Test
     @DisplayName("create checks out the caller's cart and returns 201")
     void create_returnsCreated() throws Exception {
-        when(orderService.checkout(eq(buyerId), any())).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(order);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isCreated())
@@ -128,18 +129,18 @@ class OrderControllerTest {
     @Test
     @DisplayName("create takes the buyer from the token, not from the request")
     void create_usesCallerFromToken() throws Exception {
-        when(orderService.checkout(eq(buyerId), any())).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(order);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isCreated());
 
-        verify(orderService).checkout(eq(buyerId), any());
+        verify(orderService).checkout(eq(buyerId), any(), any());
     }
 
     @Test
     @DisplayName("create returns 400 when the service refuses")
     void create_returnsBadRequest() throws Exception {
-        when(orderService.checkout(eq(buyerId), any())).thenReturn(null);
+        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(null);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isBadRequest());
@@ -149,12 +150,47 @@ class OrderControllerTest {
     @DisplayName("checkout returns 201")
     void checkout_returnsCreated() throws Exception {
         UUID addressId = UUID.randomUUID();
-        when(orderService.checkout(buyerId, addressId)).thenReturn(order);
+        when(orderService.checkout(buyerId, addressId, null)).thenReturn(order);
 
         mockMvc.perform(post("/api/orders/checkout").param("shippingAddressId", addressId.toString()).with(asCaller()))
                 .andExpect(status().isCreated());
 
-        verify(orderService).checkout(buyerId, addressId);
+verify(orderService).checkout(buyerId, addressId, null);
+    }
+
+    @Test
+    @DisplayName("checkout forwards the chosen payment method")
+    void checkout_forwardsPaymentMethod() throws Exception {
+        when(orderService.checkout(eq(buyerId), any(), eq(PaymentMethod.EFT))).thenReturn(order);
+
+        mockMvc.perform(post("/api/orders/checkout")
+                        .param("paymentMethod", "EFT")
+                        .with(asCaller()))
+                .andExpect(status().isCreated());
+
+        verify(orderService).checkout(eq(buyerId), any(), eq(PaymentMethod.EFT));
+    }
+
+    @Test
+    @DisplayName("an unknown payment method is a 400, not a silent fallback")
+    void checkout_rejectsUnknownPaymentMethod() throws Exception {
+        mockMvc.perform(post("/api/orders/checkout")
+                        .param("paymentMethod", "bitcoin")
+                        .with(asCaller()))
+                .andExpect(status().isBadRequest());
+
+        verify(orderService, never()).checkout(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("checkout leaves the method unset when the caller names none")
+    void checkout_passesNullWhenNoMethodGiven() throws Exception {
+        when(orderService.checkout(buyerId, null, null)).thenReturn(order);
+
+        mockMvc.perform(post("/api/orders/checkout").with(asCaller()))
+                .andExpect(status().isCreated());
+
+        verify(orderService).checkout(buyerId, null, null);
     }
 
     @Test

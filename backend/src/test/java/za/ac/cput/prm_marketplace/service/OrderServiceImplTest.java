@@ -3,6 +3,7 @@ package za.ac.cput.prm_marketplace.service;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -10,6 +11,9 @@ import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.Payment;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
+import za.ac.cput.prm_marketplace.domain.PaymentStatus;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -52,6 +56,8 @@ class OrderServiceImplTest {
     private AddressRepository addressRepository;
     @Mock
     private OrderItemRepository orderItemRepository;
+    @Mock
+    private IPaymentService paymentService;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -80,6 +86,15 @@ class OrderServiceImplTest {
                 .product(product)
                 .quantity(quantity)
                 .build();
+    }
+
+    /**
+     * Lets the payment filing succeed for a checkout that has otherwise been arranged to work.
+     * Stubbed rather than real so the order assertions do not depend on payment internals.
+     */
+    private void givenAPaymentIsAccepted() {
+        when(paymentService.create(any(Payment.class), any(UUID.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     // ---------- read / update / delete scoping ----------
@@ -363,8 +378,9 @@ class OrderServiceImplTest {
         when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
         when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        givenAPaymentIsAccepted();
 
-        Order order = orderService.checkout(buyer.getId(), null);
+        Order order = orderService.checkout(buyer.getId(), null, null);
 
         assertThat(order).isNotNull();
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
@@ -383,7 +399,7 @@ class OrderServiceImplTest {
         // Zero rows means somebody else took the units first.
         when(productRepository.decrementStock(product.getId(), 5)).thenReturn(0);
 
-        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+        assertThat(orderService.checkout(buyer.getId(), null, null)).isNull();
         verify(orderRepository, never()).save(any());
         verify(cartItemRepository, never()).deleteAll(any());
     }
@@ -398,7 +414,7 @@ class OrderServiceImplTest {
         // The caller's own cart is empty. Another user's cart exists but must never be consulted.
         when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of());
 
-        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+        assertThat(orderService.checkout(buyer.getId(), null, null)).isNull();
         verify(cartItemRepository, never()).findByUser_Id(strangerId);
         verify(orderRepository, never()).save(any());
     }
@@ -416,7 +432,7 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(new Address.Builder()
                         .setId(foreignAddressId).setUser(buildBuyer()).build()));
 
-        assertThat(orderService.checkout(buyer.getId(), foreignAddressId)).isNull();
+        assertThat(orderService.checkout(buyer.getId(), foreignAddressId, null)).isNull();
         verify(orderRepository, never()).save(any());
     }
 
@@ -425,13 +441,13 @@ class OrderServiceImplTest {
     void checkout_requiresBuyerAndItems() {
         UUID unknown = UUID.randomUUID();
         when(userRepository.findById(unknown)).thenReturn(Optional.empty());
-        assertThat(orderService.checkout(unknown, null)).isNull();
-        assertThat(orderService.checkout(null, null)).isNull();
+        assertThat(orderService.checkout(unknown, null, null)).isNull();
+        assertThat(orderService.checkout(null, null, null)).isNull();
 
         User buyer = buildBuyer();
         when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
         when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of());
-        assertThat(orderService.checkout(buyer.getId(), null)).isNull();
+        assertThat(orderService.checkout(buyer.getId(), null, null)).isNull();
 
         verify(orderRepository, never()).save(any());
     }
@@ -449,8 +465,9 @@ class OrderServiceImplTest {
         when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
         when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        givenAPaymentIsAccepted();
 
-        orderService.checkout(buyer.getId(), null);
+        orderService.checkout(buyer.getId(), null, null);
 
         verify(cartItemRepository).deleteAll(List.of(purchased));
     }
@@ -602,10 +619,117 @@ class OrderServiceImplTest {
         when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
         when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        givenAPaymentIsAccepted();
 
-        Order order = orderService.checkout(buyer.getId(), null);
+        Order order = orderService.checkout(buyer.getId(), null, null);
 
         assertThat(order.getBuyer().getId()).isEqualTo(buyer.getId());
         verify(orderRepository).save(eq(order));
+    }
+
+    // ---------- payment filed at checkout ----------
+
+    @Test
+    @DisplayName("checkout files a payment against the order for the buyer")
+    void checkout_filesAPayment() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("40.00"));
+        UUID orderId = UUID.randomUUID();
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 2)));
+        when(productRepository.decrementStock(product.getId(), 2)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        // Hibernate assigns the id during save(), so the stub has to as well for the payment to
+        // have an order to point at.
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation ->
+                new Order.Builder().copy(invocation.getArgument(0)).setId(orderId).build());
+        givenAPaymentIsAccepted();
+
+        orderService.checkout(buyer.getId(), null, PaymentMethod.EFT);
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentService).create(captor.capture(), eq(buyer.getId()));
+        Payment filed = captor.getValue();
+        assertThat(filed.getOrderId()).isEqualTo(orderId);
+        assertThat(filed.getMethod()).isEqualTo(PaymentMethod.EFT);
+    }
+
+    @Test
+    @DisplayName("checkout falls back to CARD when no payment method is named")
+    void checkout_defaultsToCard() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("15.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 1)));
+        when(productRepository.decrementStock(product.getId(), 1)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        givenAPaymentIsAccepted();
+
+        orderService.checkout(buyer.getId(), null, null);
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentService).create(captor.capture(), eq(buyer.getId()));
+        assertThat(captor.getValue().getMethod()).isEqualTo(PaymentMethod.CARD);
+    }
+
+    @Test
+    @DisplayName("the amount on the filed payment is the order total, never client-supplied")
+    void checkout_leavesTheAmountToTheServer() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("12.50"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 2)));
+        when(productRepository.decrementStock(product.getId(), 2)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        givenAPaymentIsAccepted();
+
+        orderService.checkout(buyer.getId(), null, PaymentMethod.CARD);
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentService).create(captor.capture(), eq(buyer.getId()));
+        // Null is the point: IPaymentService resolves it to the order total, so the client has no
+        // way to state what it is paying.
+        assertThat(captor.getValue().getAmount()).isNull();
+        assertThat(captor.getValue().getStatus()).isNull();
+    }
+
+    @Test
+    @DisplayName("checkout aborts when the payment cannot be filed")
+    void checkout_abortsWhenPaymentFails() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("9.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 1)));
+        when(productRepository.decrementStock(product.getId(), 1)).thenReturn(1);
+        when(productRepository.findById(product.getId())).thenReturn(Optional.of(product));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentService.create(any(Payment.class), any(UUID.class))).thenReturn(null);
+
+        assertThat(orderService.checkout(buyer.getId(), null, PaymentMethod.CARD)).isNull();
+        // The cart must survive a checkout that did not complete.
+        verify(cartItemRepository, never()).deleteAll(any());
+    }
+
+    @Test
+    @DisplayName("a payment is never filed for a checkout that was refused earlier")
+    void checkout_filesNoPaymentWhenRefused() {
+        User buyer = buildBuyer();
+        Product product = buildProduct(new BigDecimal("100.00"));
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId()))
+                .thenReturn(List.of(buildCartItem(product, 5)));
+        when(productRepository.decrementStock(product.getId(), 5)).thenReturn(0);
+
+        assertThat(orderService.checkout(buyer.getId(), null, PaymentMethod.CARD)).isNull();
+        verify(paymentService, never()).create(any(), any());
     }
 }

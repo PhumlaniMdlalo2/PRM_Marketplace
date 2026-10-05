@@ -90,8 +90,14 @@ public class PaymentController {
     }
 
     /**
-     * Moves the caller's own payment through its lifecycle. Refunds require FACULTY; for anyone
-     * else the service refuses the change and this reports the payment as not found.
+     * Moves the caller's own payment through its lifecycle.
+     *
+     * <p>Settling a payment -- COMPLETED, FAILED or REFUNDED -- requires FACULTY. For anyone else the
+     * service refuses the change and this reports the payment as not found, so a buyer cannot mark
+     * their own attempt as paid or failed. Retrying (PENDING) stays open to the payer.
+     *
+     * <p>The role comes from the validated token via {@link CurrentCaller}, never from the request,
+     * so naming a role in the body or query string cannot elevate the caller.
      *
      * <p>The previous version let any authenticated caller move any payment to any status.
      */

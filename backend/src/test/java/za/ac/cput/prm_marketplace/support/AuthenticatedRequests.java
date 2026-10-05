@@ -32,4 +32,8 @@ public final class AuthenticatedRequests {
     public static RequestPostProcessor asStudent(UUID userId) {
         return as(userId, Role.STUDENT);
     }
+
+    public static RequestPostProcessor asFaculty(UUID userId) {
+        return as(userId, Role.FACULTY);
+    }
 }

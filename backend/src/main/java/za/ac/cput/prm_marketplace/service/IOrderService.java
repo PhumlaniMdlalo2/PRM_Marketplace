@@ -4,6 +4,7 @@ import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 
@@ -53,8 +54,14 @@ public interface IOrderService {
      *
      * <p>Prices are read from the catalogue rather than from the request, stock is reserved
      * atomically, and the cart is emptied only once the order exists.
+     *
+     * <p>A payment record is filed for the order in the same transaction, so an order cannot exist
+     * without the attempt to pay for it. Only the method is the caller's to choose; the amount is
+     * the order total and the payer is the buyer, both decided here.
+     *
+     * @param paymentMethod how the buyer intends to pay, or null to fall back to CARD
      */
-    Order checkout(UUID buyerId, UUID shippingAddressId);
+    Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod);
 
     /**
      * Moves an order through its lifecycle.

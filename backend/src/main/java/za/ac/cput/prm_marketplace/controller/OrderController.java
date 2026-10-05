@@ -7,6 +7,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
 import za.ac.cput.prm_marketplace.security.UserPrincipal;
@@ -42,8 +43,9 @@ public class OrderController {
      */
     @PostMapping
     public ResponseEntity<Order> create(Authentication caller,
-                                        @RequestParam(required = false) UUID shippingAddressId) {
-        Order placed = orderService.checkout(callerId(caller), shippingAddressId);
+                                        @RequestParam(required = false) UUID shippingAddressId,
+                                        @RequestParam(required = false) PaymentMethod paymentMethod) {
+        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod);
         if (placed == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -54,12 +56,14 @@ public class OrderController {
      * Checks out the caller's stored cart.
      *
      * <p>The cart, the prices and the shipping address ownership are all resolved server-side, so
-     * the body only needs to name an address the caller owns.
+     * the body only needs to name an address the caller owns. {@code paymentMethod} is how the
+     * buyer intends to pay and defaults to CARD; the amount is never taken from the client.
      */
     @PostMapping("/checkout")
     public ResponseEntity<Order> checkout(Authentication caller,
-                                          @RequestParam(required = false) UUID shippingAddressId) {
-        Order placed = orderService.checkout(callerId(caller), shippingAddressId);
+                                          @RequestParam(required = false) UUID shippingAddressId,
+                                          @RequestParam(required = false) PaymentMethod paymentMethod) {
+        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod);
         if (placed == null) {
             return ResponseEntity.badRequest().build();
         }

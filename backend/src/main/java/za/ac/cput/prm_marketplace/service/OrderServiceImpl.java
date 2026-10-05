@@ -7,6 +7,8 @@ import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.Payment;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -39,19 +41,22 @@ public class OrderServiceImpl implements IOrderService {
     private final CartItemRepository cartItemRepository;
     private final AddressRepository addressRepository;
     private final OrderItemRepository orderItemRepository;
+    private final IPaymentService paymentService;
 
     public OrderServiceImpl(OrderRepository orderRepository,
                             UserRepository userRepository,
                             ProductRepository productRepository,
                             CartItemRepository cartItemRepository,
                             AddressRepository addressRepository,
-                            OrderItemRepository orderItemRepository) {
+                            OrderItemRepository orderItemRepository,
+                            IPaymentService paymentService) {
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
         this.cartItemRepository = cartItemRepository;
         this.addressRepository = addressRepository;
         this.orderItemRepository = orderItemRepository;
+        this.paymentService = paymentService;
     }
 
     @Override
@@ -151,7 +156,7 @@ public class OrderServiceImpl implements IOrderService {
 
     @Override
     @Transactional
-    public Order checkout(UUID buyerId, UUID shippingAddressId) {
+    public Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod) {
         if (buyerId == null) {
             return null;
         }
@@ -218,6 +223,21 @@ public class OrderServiceImpl implements IOrderService {
         order.setTotalAmount(totalOf(order));
 
         Order saved = orderRepository.save(order);
+
+        // File the payment before emptying the cart, and let a failure here abort the whole
+        // checkout. The order existing with no record of any attempt to pay for it is the state
+        // this replaces: the order is what the buyer is billed against, so the two are written
+        // together or not at all.
+        //
+        // The amount is left null on purpose. IPaymentService resolves a null amount to the order
+        // total, so there is no path by which the caller states what they are paying.
+        Payment attempt = new Payment.Builder()
+                .setOrderId(saved.getId())
+                .setMethod(paymentMethod == null ? PaymentMethod.CARD : paymentMethod)
+                .build();
+        if (paymentService.create(attempt, buyerId) == null) {
+            return null;
+        }
 
         // Emptying the cart is scoped to the lines that actually made it into the order.
         cartItemRepository.deleteAll(purchased);

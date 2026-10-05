@@ -35,6 +35,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asFaculty;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
 /**
@@ -249,16 +250,47 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("the payer can complete their own payment")
+    @DisplayName("faculty can complete a payment")
     void updateStatus_validTransition_returnsOk() throws Exception {
         when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
-                eq(payerId), eq(Role.STUDENT))).thenReturn(buildPayment(PaymentStatus.COMPLETED, payerId));
+                eq(payerId), eq(Role.FACULTY))).thenReturn(buildPayment(PaymentStatus.COMPLETED, payerId));
+
+        mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
+                        .with(asFaculty(payerId))
+                        .param("status", "COMPLETED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
+    @DisplayName("a payer asking to settle their own payment is not found")
+    void updateStatus_payerCannotSettle_returnsNotFound() throws Exception {
+        // The role the controller hands the service is the token's, so a student cannot claim
+        // faculty authority by putting anything in the request.
+        when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
+                eq(payerId), eq(Role.STUDENT))).thenReturn(null);
 
         mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
                         .with(asStudent(payerId))
                         .param("status", "COMPLETED"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("COMPLETED"));
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("the role comes from the token, not from the request")
+    void updateStatus_roleIsNotTakenFromTheRequest() throws Exception {
+        when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
+                eq(payerId), eq(Role.STUDENT))).thenReturn(null);
+
+        // Asking for the role by name in the body must not elevate the caller.
+        mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
+                        .with(asStudent(payerId))
+                        .param("status", "COMPLETED")
+                        .param("role", "FACULTY"))
+                .andExpect(status().isNotFound());
+
+        verify(paymentService).updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
+                eq(payerId), eq(Role.STUDENT));
     }
 
     @Test

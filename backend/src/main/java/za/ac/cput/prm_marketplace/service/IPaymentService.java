@@ -56,9 +56,17 @@ public interface IPaymentService {
      * Moves one of the caller's own payments through the lifecycle
      * (PENDING -> COMPLETED/FAILED, FAILED -> PENDING, COMPLETED -> REFUNDED) and notifies the payer.
      *
-     * <p>Refund is a decision about money leaving the business, so it is limited to FACULTY even
-     * though the payment is the caller's own. Returns null when the payment is missing, is not the
-     * caller's, the transition is not allowed, or the status requires a role the caller lacks.
+     * <p>Only FACULTY may settle a payment: everything out of PENDING (COMPLETED, FAILED, REFUNDED)
+     * requires that role, even though the payment is the caller's own. The payer cannot mark their
+     * own attempt as paid or as failed. Re-attempting a payment, which is the PENDING move, stays
+     * open to everyone because it asserts nothing about money that has moved.
+     *
+     * <p>Consequence worth being explicit about: with no payment gateway wired up, payments stay at
+     * PENDING and orders do not advance on their own. Faculty settle them by hand until a gateway
+     * callback replaces them.
+     *
+     * <p>Returns null when the payment is missing, is not the caller's, the transition is not
+     * allowed, or the status requires a role the caller lacks.
      */
     Payment updateStatus(UUID id, PaymentStatus status, UUID requesterId, Role requesterRole);
 }

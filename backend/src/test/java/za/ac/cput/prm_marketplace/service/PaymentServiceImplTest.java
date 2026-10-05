@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -341,7 +342,7 @@ class PaymentServiceImplTest {
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.STUDENT);
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.FACULTY);
 
         assertThat(updated.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         assertThat(updated.getPaidAt()).isNotNull();
@@ -350,14 +351,61 @@ class PaymentServiceImplTest {
     }
 
     @Test
+    @DisplayName("the payer cannot mark their own payment as paid")
+    void updateStatus_completionRequiresFaculty() {
+        // No stubbing: the authority check runs before the payment is loaded, so the repository is
+        // never consulted. That ordering is the point -- an unauthorised caller learns nothing about
+        // whether the id exists.
+        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.STUDENT))
+                .isNull();
+
+        verifyNoInteractions(paymentRepository);
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("the payer cannot mark their own payment as failed either")
+    void updateStatus_failureRequiresFaculty() {
+        // Otherwise a buyer could erase a completed charge they regret.
+        assertThat(paymentService.updateStatus(id, PaymentStatus.FAILED, payerId, Role.VENDOR))
+                .isNull();
+
+        verifyNoInteractions(paymentRepository);
+    }
+
+    @Test
+    @DisplayName("no role other than faculty can settle a payment")
+    void updateStatus_everyNonFacultyRoleIsRefused() {
+        for (Role role : List.of(Role.STUDENT, Role.VENDOR, Role.RESIDENT)) {
+            assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, role))
+                    .as("role %s must not settle a payment", role)
+                    .isNull();
+        }
+
+        verifyNoInteractions(paymentRepository);
+    }
+
+    @Test
+    @DisplayName("the payer may retry their own payment")
+    void updateStatus_retryingIsAllowedForThePayer() {
+        when(paymentRepository.findByIdAndUserId(id, payerId))
+                .thenReturn(Optional.of(buildPayment(PaymentStatus.FAILED)));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.PENDING, payerId, Role.STUDENT);
+
+        assertThat(updated.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        // A retry asserts nothing about money that has moved, so it is not a settlement.
+        verify(notificationService, never()).send(any(), any(), anyString(), anyString());
+    }
+
+    @Test
     @DisplayName("the payer cannot refund their own payment")
     void updateStatus_refundRequiresFaculty() {
-        when(paymentRepository.findByIdAndUserId(id, payerId))
-                .thenReturn(Optional.of(buildPayment(PaymentStatus.COMPLETED)));
-
         assertThat(paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.STUDENT)).isNull();
 
-        verify(paymentRepository, never()).save(any());
+        verifyNoInteractions(paymentRepository);
         verifyNoInteractions(notificationService);
     }
 
@@ -375,11 +423,13 @@ class PaymentServiceImplTest {
     }
 
     @Test
-    @DisplayName("a caller cannot move somebody else's payment")
+    @DisplayName("even faculty cannot move somebody else's payment")
     void updateStatus_rejectsSomebodyElsesPayment() {
         when(paymentRepository.findByIdAndUserId(id, intruderId)).thenReturn(Optional.empty());
 
-        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, intruderId, Role.STUDENT))
+        // Faculty has authority over settling, not over whose payment it is. Ownership is still
+        // scoped to the caller, so this stays refused at full privilege.
+        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, intruderId, Role.FACULTY))
                 .isNull();
 
         verify(paymentRepository, never()).save(any());
@@ -409,6 +459,16 @@ class PaymentServiceImplTest {
     }
 
     @Test
+    @DisplayName("a null role is not faculty, so settling is refused without a database read")
+    void updateStatus_nullRoleCannotSettle() {
+        // Worth pinning down because `status != PENDING && role != FACULTY` would otherwise be read
+        // as permitting a null role through some other path.
+        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, null)).isNull();
+
+        verifyNoInteractions(paymentRepository);
+    }
+
+    @Test
     @DisplayName("a notification failure does not undo the saved payment")
     void updateStatus_survivesANotificationFailure() {
         when(paymentRepository.findByIdAndUserId(id, payerId))
@@ -418,7 +478,7 @@ class PaymentServiceImplTest {
         doThrow(new RuntimeException("sms gateway down"))
                 .when(notificationService).send(any(), any(), anyString(), anyString());
 
-        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.STUDENT);
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.FACULTY);
 
         assertThat(updated.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         verify(paymentRepository).save(any(Payment.class));
