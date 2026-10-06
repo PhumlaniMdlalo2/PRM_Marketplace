@@ -84,6 +84,20 @@ export const createComment = async (postId, body, parentId = null) => {
 };
 
 /**
+ * Edits a comment's body. The server refuses this unless the caller wrote the comment, and answers
+ * 404 when they did not — treated here as "gone" rather than as an error to sit on.
+ */
+export const updateComment = async (id, body) => {
+  const { data } = await api.put(`/comments/${id}`, { body });
+  return data;
+};
+
+/** Deletes a comment. The server refuses this unless the caller wrote the comment. */
+export const deleteComment = async (id) => {
+  await api.delete(`/comments/${id}`);
+};
+
+/**
  * Likes or unlikes a post.
  *
  * The endpoint answers 201 with the new like, or 204 with no body when the like was removed, so the

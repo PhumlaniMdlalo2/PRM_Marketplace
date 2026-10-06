@@ -1,16 +1,21 @@
 import { useCallback, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ThumbsUp, MessageCircle, Send } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { MessageCircle, Pencil, Send, ThumbsUp, Trash2 } from 'lucide-react';
 import Avatar from '../components/ui/Avatar';
 import BackButton from '../components/ui/BackButton';
+import Button from '../components/ui/Button';
 import Layout from '../components/layout/Layout';
 import {
   createComment,
+  deleteComment,
+  deletePost,
   getLikeCount,
   getPost,
   hasLikedPost,
   listComments,
   toggleLike,
+  updateComment,
+  updatePost,
 } from '../api/bulletin';
 import { useAuth } from '../auth/useAuth';
 import { useAsync } from '../hooks/useAsync';
@@ -34,6 +39,21 @@ const relativeTime = (value) => {
  * cycle or a chain deeper than anyone will read should render as text, not hang the page.
  */
 const MAX_DEPTH = 6;
+
+const POST_TITLE_LIMIT = 200;
+const POST_BODY_LIMIT = 5000;
+const COMMENT_BODY_LIMIT = 2000;
+
+/**
+ * Turns a failed edit or delete into something worth showing. The server answers 400 and 404 with
+ * an empty body, and the shared client would otherwise dress both of them up as "Cannot reach the
+ * server", which is a sentence that sends people to check a wifi setting that is fine.
+ */
+const describeFailure = (caught, { notFound, badRequest }) => {
+  if (caught?.status === 404) return notFound;
+  if (caught?.status === 400) return badRequest;
+  return caught?.message ?? 'That change could not be saved.';
+};
 
 const nest = (comments) => {
   const nodes = new Map();
@@ -73,6 +93,8 @@ const PostComments = () => {
         title: post.title,
         body: post.body,
         category: post.category,
+        imageUrl: post.imageUrl ?? null,
+        authorId: post.author?.id ?? null,
         authorName: post.author?.name ?? 'Unknown user',
         authorAvatar: post.author?.avatarUrl || null,
         time: relativeTime(post.createdAt),
@@ -83,6 +105,7 @@ const PostComments = () => {
       comments: comments.map((comment) => ({
         id: comment.id,
         parentId: comment.parentId ?? null,
+        authorId: comment.author?.id ?? null,
         authorName: comment.author?.name ?? 'Unknown user',
         authorAvatar: comment.author?.avatarUrl || null,
         body: comment.body,
@@ -92,11 +115,21 @@ const PostComments = () => {
   }, [id, isAuthenticated]);
 
   const { data, loading, error, setData } = useAsync(loadThread);
+  const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(null);
   const [likeBusy, setLikeBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState(null);
+  const [editingPost, setEditingPost] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [bodyDraft, setBodyDraft] = useState('');
+  const [confirmingPostDelete, setConfirmingPostDelete] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [confirmingCommentId, setConfirmingCommentId] = useState(null);
 
   const post = data?.post ?? null;
   const threads = nest(data?.comments ?? []);
@@ -140,6 +173,139 @@ const PostComments = () => {
     }
   };
 
+  /** The server refuses an edit or a delete that the caller did not write, so this is only ever a
+   *  shortcut past a control that would have come back rejected anyway. */
+  const owns = (authorId) => Boolean(
+    isAuthenticated && authorId && user?.id && String(authorId) === String(user.id),
+  );
+
+  /** Refetched rather than patched by hand for anything the server owns — a delete takes its replies
+   *  with it, and the post's comment count is the server's to restate. Read quietly: the mutation has
+   *  already been accepted, so a re-read that fails must not put an error in front of the reader about
+   *  something that worked. */
+  const refreshQuietly = async () => {
+    try {
+      const next = await loadThread();
+      if (next) setData(next);
+    } catch {
+      // Left as it is. The next visit to this thread picks up what the server holds.
+    }
+  };
+
+  const startPostEdit = () => {
+    setActionError(null);
+    setTitleDraft(post?.title ?? '');
+    setBodyDraft(post?.body ?? '');
+    setEditingPost(true);
+    setConfirmingPostDelete(false);
+  };
+
+  const savePost = async () => {
+    const title = titleDraft.trim();
+    const body = bodyDraft.trim();
+    if (!title || !body || saving) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await updatePost(id, { title, body, category: post?.category, imageUrl: post?.imageUrl });
+    } catch (caught) {
+      setActionError(describeFailure(caught, {
+        notFound: 'That post is no longer yours to change.',
+        badRequest: 'That post could not be saved.',
+      }));
+      setSaving(false);
+      return;
+    }
+    // Shown from what was written rather than from the re-read, so the edit is on screen the moment
+    // the server says yes.
+    setData((current) => (
+      current
+        ? { ...current, post: { ...current.post, title, body } }
+        : current
+    ));
+    setEditingPost(false);
+    setSaving(false);
+    await refreshQuietly();
+  };
+
+  const removePost = async () => {
+    if (saving) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await deletePost(id);
+      navigate('/bulletin');
+    } catch (caught) {
+      setActionError(describeFailure(caught, {
+        notFound: 'That post is already gone.',
+        badRequest: 'That post could not be deleted.',
+      }));
+      setConfirmingPostDelete(false);
+      setSaving(false);
+    }
+  };
+
+  const startCommentEdit = (comment) => {
+    setActionError(null);
+    setCommentDraft(comment.body ?? '');
+    setEditingCommentId(comment.id);
+    setConfirmingCommentId(null);
+  };
+
+  const saveComment = async () => {
+    const body = commentDraft.trim();
+    if (!body || saving || !editingCommentId) return;
+    const target = editingCommentId;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await updateComment(target, body);
+    } catch (caught) {
+      setActionError(describeFailure(caught, {
+        notFound: 'That comment is no longer yours to change.',
+        badRequest: 'That comment could not be saved.',
+      }));
+      setSaving(false);
+      return;
+    }
+    setData((current) => (
+      current
+        ? {
+          ...current,
+          comments: current.comments.map((entry) => (
+            entry.id === target ? { ...entry, body } : entry
+          )),
+        }
+        : current
+    ));
+    setEditingCommentId(null);
+    setSaving(false);
+    await refreshQuietly();
+  };
+
+  const removeComment = async () => {
+    if (saving || !confirmingCommentId) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await deleteComment(confirmingCommentId);
+    } catch (caught) {
+      if (caught?.status !== 404) {
+        setActionError(describeFailure(caught, {
+          notFound: 'That comment is already gone.',
+          badRequest: 'That comment could not be deleted.',
+        }));
+        setConfirmingCommentId(null);
+        setSaving(false);
+        return;
+      }
+      // Already gone: take it off the screen rather than argue about who deleted it first.
+    }
+    setConfirmingCommentId(null);
+    setSaving(false);
+    await refreshQuietly();
+  };
+
   const renderComment = (comment, depth = 0) => (
     <div key={comment.id} className={depth > 0 ? 'ml-8 mt-3' : ''}>
       <div className="flex items-start gap-3">
@@ -149,19 +315,105 @@ const PostComments = () => {
             <h4 className="font-semibold text-text-primary text-sm truncate">{comment.authorName}</h4>
             <span className="text-xs text-text-muted whitespace-nowrap">{comment.time}</span>
           </div>
-          <p className="mt-1 text-text-secondary text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-            {comment.body}
-          </p>
-          {isAuthenticated && depth < MAX_DEPTH - 1 && (
-            <button
-              onClick={() => setReplyTo(replyTo === comment.id ? null : comment.id)}
-              className={`flex items-center gap-1 mt-1.5 text-xs font-medium transition-colors ${
-                replyTo === comment.id ? 'text-primary' : 'text-text-muted hover:text-primary'
-              }`}
-            >
-              <MessageCircle size={13} />
-              {replyTo === comment.id ? 'Cancel reply' : 'Reply'}
-            </button>
+
+          {editingCommentId === comment.id ? (
+            <div className="mt-1">
+              <label htmlFor={`comment-${comment.id}`} className="sr-only">Edit your comment</label>
+              <textarea
+                id={`comment-${comment.id}`}
+                value={commentDraft}
+                onChange={(e) => setCommentDraft(e.target.value)}
+                rows={3}
+                maxLength={COMMENT_BODY_LIMIT}
+                autoFocus
+                className="w-full px-3 py-2 bg-lavender rounded-xl text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:bg-white transition-all resize-y"
+              />
+              <div className="mt-1.5 flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setEditingCommentId(null)}
+                  disabled={saving}
+                  className="text-xs font-medium text-text-muted hover:text-text-primary disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <Button
+                  size="sm"
+                  onClick={saveComment}
+                  disabled={saving || !commentDraft.trim()}
+                >
+                  {saving ? 'Saving…' : 'Save changes'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="mt-1 text-text-secondary text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+                {comment.body}
+              </p>
+              {confirmingCommentId === comment.id ? (
+                <div
+                  className="mt-2 p-2.5 bg-red-50 border border-red-200 rounded-xl flex flex-wrap items-center justify-between gap-2"
+                  role="alert"
+                >
+                  <p className="text-xs text-red-800">Delete this comment? Replies go with it.</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setConfirmingCommentId(null)}
+                      disabled={saving}
+                      className="text-xs font-medium text-text-muted hover:text-text-primary disabled:opacity-50"
+                    >
+                      Keep it
+                    </button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={removeComment}
+                      disabled={saving}
+                    >
+                      {saving ? 'Deleting…' : 'Delete for good'}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4">
+                  {isAuthenticated && depth < MAX_DEPTH - 1 && (
+                    <button
+                      onClick={() => setReplyTo(replyTo === comment.id ? null : comment.id)}
+                      className={`flex items-center gap-1 mt-1.5 text-xs font-medium transition-colors ${
+                        replyTo === comment.id ? 'text-primary' : 'text-text-muted hover:text-primary'
+                      }`}
+                    >
+                      <MessageCircle size={13} />
+                      {replyTo === comment.id ? 'Cancel reply' : 'Reply'}
+                    </button>
+                  )}
+                  {owns(comment.authorId) && (
+                    <button
+                      onClick={() => startCommentEdit(comment)}
+                      aria-label="Edit your comment"
+                      className="flex items-center gap-1 mt-1.5 text-xs font-medium text-text-muted hover:text-primary transition-colors"
+                    >
+                      <Pencil size={13} />
+                      Edit
+                    </button>
+                  )}
+                  {owns(comment.authorId) && (
+                    <button
+                      onClick={() => {
+                        setActionError(null);
+                        setConfirmingCommentId(comment.id);
+                        setEditingCommentId(null);
+                      }}
+                      aria-label="Delete your comment"
+                      className="flex items-center gap-1 mt-1.5 text-xs font-medium text-text-muted hover:text-error transition-colors"
+                    >
+                      <Trash2 size={13} />
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -180,6 +432,12 @@ const PostComments = () => {
           </h1>
         </div>
 
+        {actionError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl" role="alert">
+            <p className="text-sm text-red-800">{actionError}</p>
+          </div>
+        )}
+
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl" role="alert">
             <p className="text-sm text-red-800">{error.message}</p>
@@ -193,22 +451,119 @@ const PostComments = () => {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="font-semibold text-text-primary truncate">{post.authorName}</h3>
-                  <span className="text-xs text-text-muted whitespace-nowrap">{post.time}</span>
-                </div>
-                {post.title && (
-                  <h4 className="mt-2 font-semibold text-text-primary text-[15px] leading-snug">
-                    {post.title}
-                  </h4>
-                )}
-                <p className="mt-1 text-text-secondary leading-relaxed text-wrap-pretty whitespace-pre-wrap">
-                  {post.body}
-                </p>
-                {post.category && (
-                  <div className="mt-2.5 flex gap-1.5 flex-wrap">
-                    <span className="text-xs font-medium text-primary bg-primary-muted px-2 py-0.5 rounded-md">
-                      #{post.category}
-                    </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-text-muted whitespace-nowrap">{post.time}</span>
+                    {owns(post.authorId) && !editingPost && !confirmingPostDelete && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={startPostEdit}
+                          aria-label="Edit your post"
+                          className="p-1 text-text-muted hover:text-primary transition-colors"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActionError(null);
+                            setConfirmingPostDelete(true);
+                          }}
+                          aria-label="Delete your post"
+                          className="p-1 text-text-muted hover:text-error transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
+                </div>
+
+                {confirmingPostDelete && (
+                  <div
+                    className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex flex-wrap items-center justify-between gap-2"
+                    role="alert"
+                  >
+                    <p className="text-sm text-red-800">Delete this post and every comment on it?</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setConfirmingPostDelete(false)}
+                        disabled={saving}
+                        className="text-xs font-medium text-text-muted hover:text-text-primary disabled:opacity-50"
+                      >
+                        Keep it
+                      </button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={removePost}
+                        disabled={saving}
+                      >
+                        {saving ? 'Deleting…' : 'Delete for good'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {editingPost ? (
+                  <div className="mt-2 space-y-2">
+                    <label htmlFor="post-title" className="sr-only">Post title</label>
+                    <input
+                      id="post-title"
+                      type="text"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      maxLength={POST_TITLE_LIMIT}
+                      className="w-full px-3 py-2 bg-lavender rounded-xl text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:bg-white transition-all"
+                    />
+                    <label htmlFor="post-body" className="sr-only">Post content</label>
+                    <textarea
+                      id="post-body"
+                      value={bodyDraft}
+                      onChange={(e) => setBodyDraft(e.target.value)}
+                      rows={6}
+                      maxLength={POST_BODY_LIMIT}
+                      autoFocus
+                      className="w-full px-3 py-2 bg-lavender rounded-xl text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:bg-white transition-all resize-y"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-text-muted">
+                        {bodyDraft.length} / {POST_BODY_LIMIT}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setEditingPost(false)}
+                          disabled={saving}
+                          className="text-xs font-medium text-text-muted hover:text-text-primary disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <Button
+                          size="sm"
+                          onClick={savePost}
+                          disabled={saving || !titleDraft.trim() || !bodyDraft.trim()}
+                        >
+                          {saving ? 'Saving…' : 'Save changes'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {post.title && (
+                      <h4 className="mt-2 font-semibold text-text-primary text-[15px] leading-snug">
+                        {post.title}
+                      </h4>
+                    )}
+                    <p className="mt-1 text-text-secondary leading-relaxed text-wrap-pretty whitespace-pre-wrap">
+                      {post.body}
+                    </p>
+                    {post.category && (
+                      <div className="mt-2.5 flex gap-1.5 flex-wrap">
+                        <span className="text-xs font-medium text-primary bg-primary-muted px-2 py-0.5 rounded-md">
+                          #{post.category}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
                 <div className="mt-3.5 pt-3 border-t border-border flex items-center gap-6">
                   <button
