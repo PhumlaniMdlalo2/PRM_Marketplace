@@ -14,8 +14,9 @@ import { useAuth } from './useAuth';
  * which the decision had to be deferred.
  *
  * <p>This is a usability guard, not a security control. Every one of these endpoints is protected
- * server-side too, and the axios interceptor signs the user out on a 401. The point here is to avoid
- * showing a signed-out user a page of empty tables and unexplained failures.
+ * server-side too, and the axios interceptor renews an expired session on its own and signs the
+ * user out once the server will not renew it. The point here is to avoid showing a signed-out user
+ * a page of empty tables and unexplained failures.
  */
 export default function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();

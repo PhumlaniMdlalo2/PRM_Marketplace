@@ -79,6 +79,7 @@ class OpenApiContractTest {
     private static final List<String> PUBLIC_AUTH_ROUTES = List.of(
             "/api/auth/register",
             "/api/auth/login",
+            "/api/auth/refresh",
             "/api/auth/verify",
             "/api/auth/resend-code",
             "/api/auth/forgot-password",

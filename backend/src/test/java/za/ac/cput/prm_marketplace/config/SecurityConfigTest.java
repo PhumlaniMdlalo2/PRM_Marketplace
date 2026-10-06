@@ -78,7 +78,7 @@ class SecurityConfigTest {
     @DisplayName("auth endpoints are public so registration and login can bootstrap a session")
     void authEndpoints_arePublic() throws Exception {
         when(authService.register(any())).thenReturn(new za.ac.cput.prm_marketplace.dto.AuthResponse(
-                "jwt-token", "Bearer", 3600L,
+                "jwt-token", "refresh-token", "Bearer", 3600L,
                 new za.ac.cput.prm_marketplace.dto.UserResponse(
                         UUID.randomUUID(), "Jane", "jane@example.com",
                         za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, false, null)));
@@ -88,6 +88,25 @@ class SecurityConfigTest {
                         .content("""
                                 {"name":"Jane","email":"jane@example.com","password":"password123"}"""))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("refresh is public, because the credential it needs is the one that just expired")
+    void refreshEndpoint_isPublic() throws Exception {
+        when(authService.refresh("refresh-token")).thenReturn(
+                new za.ac.cput.prm_marketplace.dto.AuthResponse(
+                        "jwt-token", "another-refresh-token", "Bearer", 3600L,
+                        new za.ac.cput.prm_marketplace.dto.UserResponse(
+                                UUID.randomUUID(), "Jane", "jane@example.com",
+                                za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, true, null)));
+
+        // The service answering at all is the assertion: a protected route would be stopped by the
+        // filter chain with 401 before the controller was reached, whatever the mock returned.
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType("application/json")
+                        .content("""
+                                {"refreshToken":"refresh-token"}"""))
+                .andExpect(status().isOk());
     }
 
     @Test

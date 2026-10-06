@@ -1,9 +1,11 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.PasswordResetToken;
+import za.ac.cput.prm_marketplace.domain.RefreshToken;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VerificationCode;
@@ -17,12 +19,15 @@ import za.ac.cput.prm_marketplace.exception.ConflictException;
 import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
 import za.ac.cput.prm_marketplace.mapper.UserMapper;
 import za.ac.cput.prm_marketplace.repository.PasswordResetTokenRepository;
+import za.ac.cput.prm_marketplace.repository.RefreshTokenRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 import za.ac.cput.prm_marketplace.repository.VerificationCodeRepository;
 import za.ac.cput.prm_marketplace.security.JwtService;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
@@ -34,6 +39,12 @@ public class AuthServiceImpl implements IAuthService {
     private static final long CODE_VALID_MINUTES = 15;
     private static final long RESET_TOKEN_VALID_MINUTES = 60;
 
+    /** What every failed exchange answers, whichever of the reasons below it turned out to be. */
+    private static final String SESSION_EXPIRED_MESSAGE = "Session expired. Please sign in again";
+
+    /** Bytes behind a refresh token. 48 of them become 64 characters of base64url. */
+    private static final int REFRESH_TOKEN_BYTES = 48;
+
     /** Roles an account may pick for itself at signup. Faculty is granted out of band. */
     private static final Set<Role> SELF_SERVICE_ROLES = EnumSet.of(
             Role.STUDENT, Role.VENDOR, Role.RESIDENT);
@@ -41,24 +52,30 @@ public class AuthServiceImpl implements IAuthService {
     private final UserRepository userRepository;
     private final VerificationCodeRepository verificationCodeRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final IEmailService emailService;
 
+    private final long refreshExpirationMillis;
     private final SecureRandom random = new SecureRandom();
 
     public AuthServiceImpl(UserRepository userRepository,
                            VerificationCodeRepository verificationCodeRepository,
                            PasswordResetTokenRepository passwordResetTokenRepository,
+                           RefreshTokenRepository refreshTokenRepository,
                            PasswordEncoder passwordEncoder,
                            JwtService jwtService,
-                           IEmailService emailService) {
+                           IEmailService emailService,
+                           @Value("${app.jwt.refresh-expiration-ms:2592000000}") long refreshExpirationMillis) {
         this.userRepository = userRepository;
         this.verificationCodeRepository = verificationCodeRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.emailService = emailService;
+        this.refreshExpirationMillis = refreshExpirationMillis;
     }
 
     @Override
@@ -95,8 +112,12 @@ public class AuthServiceImpl implements IAuthService {
         return buildAuthResponse(saved);
     }
 
+    /**
+     * Read-write on purpose, where it used to be read-only: a successful login now also writes the
+     * refresh token that lets the session outlive the access token it just minted.
+     */
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public AuthResponse login(LoginRequest request) {
         if (request == null) {
             throw new BadRequestException("Login request is required");
@@ -109,6 +130,35 @@ public class AuthServiceImpl implements IAuthService {
         }
         if (!user.isVerified()) {
             throw new UnauthorizedException("Account is not verified yet");
+        }
+
+        return buildAuthResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse refresh(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new BadRequestException("Refresh token is required");
+        }
+
+        RefreshToken token = refreshTokenRepository.findByTokenAndUsedFalse(refreshToken.trim())
+                .orElseThrow(() -> new UnauthorizedException(SESSION_EXPIRED_MESSAGE));
+
+        if (!token.isValid()) {
+            // Reached when the row exists and its clock has run out: spent rows never get this far
+            // because the lookup only returns unused ones.
+            throw new UnauthorizedException(SESSION_EXPIRED_MESSAGE);
+        }
+
+        User user = token.getUser();
+
+        // Spent under a predicate rather than by writing the row back, so a copy of this token being
+        // presented at the same moment — from a second tab that read it a little too late, or from
+        // whoever is holding a stolen one — finds nothing to exchange rather than a second working
+        // session. Zero rows means somebody else won.
+        if (refreshTokenRepository.spendIfUnused(token.getToken(), LocalDateTime.now()) == 0) {
+            throw new UnauthorizedException(SESSION_EXPIRED_MESSAGE);
         }
 
         return buildAuthResponse(user);
@@ -188,6 +238,12 @@ public class AuthServiceImpl implements IAuthService {
         passwordResetTokenRepository.save(token);
     }
 
+    /**
+     * Every refresh token the account holds is dropped along with the password, so the old
+     * credential stops working on every device at once rather than only on the one whose access
+     * token happens to expire first. The caller whose password this is gets a fresh pair at its next
+     * refresh only after signing in again, which is the point.
+     */
     @Override
     @Transactional
     public void changePassword(UUID requesterId, String currentPassword, String newPassword) {
@@ -200,6 +256,7 @@ public class AuthServiceImpl implements IAuthService {
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
+        refreshTokenRepository.deleteByUserId(user.getId());
     }
 
     /**
@@ -226,13 +283,42 @@ public class AuthServiceImpl implements IAuthService {
         return requested;
     }
 
+    /**
+     * The whole credential set a client is given: a short-lived access token, and the refresh
+     * token that renews it once the short one is gone.
+     *
+     * <p>Both are minted together and neither is useful alone, which is why every path that ends a
+     * caller's registration, sign-in or renewal comes through here.
+     */
     private AuthResponse buildAuthResponse(User user) {
         return new AuthResponse(
                 jwtService.generateToken(user),
+                issueRefreshToken(user),
                 "Bearer",
                 jwtService.getExpirationMillis() / 1000,
                 UserMapper.toResponse(user)
         );
+    }
+
+    /**
+     * Stores a new refresh token for the account and returns the value the client must keep.
+     *
+     * <p>Random rather than signed for the reason the table exists: a stored value can be looked up,
+     * found spent and dropped, where a second signed JWT would answer "valid" until its own clock
+     * ran out no matter how many times it had already been exchanged.
+     */
+    private String issueRefreshToken(User user) {
+        byte[] bytes = new byte[REFRESH_TOKEN_BYTES];
+        random.nextBytes(bytes);
+        String value = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+
+        refreshTokenRepository.save(new RefreshToken.Builder()
+                .setUser(user)
+                .setToken(value)
+                .setExpiresAt(LocalDateTime.now().plus(refreshExpirationMillis, ChronoUnit.MILLIS))
+                .build());
+
+        return value;
     }
 
     private String generateCode() {

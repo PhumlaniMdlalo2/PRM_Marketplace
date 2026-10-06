@@ -14,6 +14,19 @@ public interface IAuthService {
 
     AuthResponse login(LoginRequest request);
 
+    /**
+     * Trades a refresh token for a fresh pair of credentials.
+     *
+     * <p>The presented token is spent as part of the exchange, so the caller gets back a new
+     * refresh token and must store it: the one it sent is done. A token that is unknown, already
+     * spent, or past its expiry produces the same {@code 401} with the same message, because which
+     * of the three happened is information about the store rather than about the caller's session.
+     *
+     * @throws za.ac.cput.prm_marketplace.exception.UnauthorizedException when the token cannot be
+     *         exchanged, which is the client's signal to sign in again
+     */
+    AuthResponse refresh(String refreshToken);
+
     UserResponse verifyCode(String email, String code);
 
     void resendCode(String email);

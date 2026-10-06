@@ -61,7 +61,7 @@ class AuthControllerTest {
     }
 
     private AuthResponse buildAuthResponse() {
-        return new AuthResponse("jwt-token", "Bearer", 3600L, buildUser(true));
+        return new AuthResponse("jwt-token", "refresh-token", "Bearer", 3600L, buildUser(true));
     }
 
     @Test
@@ -126,6 +126,45 @@ class AuthControllerTest {
                         .content("""
                                 {"email":"jane@example.com","password":"wrong"}"""))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("refresh: returns 200 with a new token and refresh token")
+    void refresh_returnsOk() throws Exception {
+        when(authService.refresh("refresh-token")).thenReturn(buildAuthResponse());
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"refreshToken":"refresh-token"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value("jwt-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"));
+    }
+
+    @Test
+    @DisplayName("refresh: a missing token is a bad request rather than a call with a null")
+    void refresh_missingToken_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verify(authService, never()).refresh(any());
+    }
+
+    @Test
+    @DisplayName("refresh: a token the server will not exchange is 401, so the client signs in again")
+    void refresh_expiredSession_returnsUnauthorized() throws Exception {
+        when(authService.refresh("spent-token"))
+                .thenThrow(new UnauthorizedException("Session expired. Please sign in again"));
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"refreshToken":"spent-token"}"""))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Session expired. Please sign in again"));
     }
 
     @Test

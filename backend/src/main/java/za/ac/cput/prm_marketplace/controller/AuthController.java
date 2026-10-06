@@ -12,6 +12,7 @@ import za.ac.cput.prm_marketplace.dto.ChangePasswordRequest;
 import za.ac.cput.prm_marketplace.dto.ForgotPasswordRequest;
 import za.ac.cput.prm_marketplace.dto.LoginRequest;
 import za.ac.cput.prm_marketplace.dto.RegisterRequest;
+import za.ac.cput.prm_marketplace.dto.RefreshRequest;
 import za.ac.cput.prm_marketplace.dto.ResetPasswordRequest;
 import za.ac.cput.prm_marketplace.dto.UserResponse;
 import za.ac.cput.prm_marketplace.dto.VerifyCodeRequest;
@@ -71,6 +72,20 @@ public class AuthController {
     public ResponseEntity<Map<String, String>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request);
         return ResponseEntity.ok(Map.of("message", "Password updated"));
+    }
+
+    /**
+     * Renews a session that has run out of access tokens.
+     *
+     * <p>Public for the same reason login is: the caller is here precisely because its credential
+     * no longer works, so requiring a valid one to ask for a new one would make renewal impossible.
+     * The credential it does present is the refresh token, which is checked against the store and
+     * spent as part of this call.
+     */
+    @SecurityRequirements
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshRequest request) {
+        return ResponseEntity.ok(authService.refresh(request.refreshToken()));
     }
 
     /**

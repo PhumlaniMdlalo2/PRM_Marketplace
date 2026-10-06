@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import za.ac.cput.prm_marketplace.domain.PasswordResetToken;
+import za.ac.cput.prm_marketplace.domain.RefreshToken;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VerificationCode;
@@ -21,6 +22,7 @@ import za.ac.cput.prm_marketplace.exception.BadRequestException;
 import za.ac.cput.prm_marketplace.exception.ConflictException;
 import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
 import za.ac.cput.prm_marketplace.repository.PasswordResetTokenRepository;
+import za.ac.cput.prm_marketplace.repository.RefreshTokenRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 import za.ac.cput.prm_marketplace.repository.VerificationCodeRepository;
 import za.ac.cput.prm_marketplace.security.JwtService;
@@ -48,6 +50,9 @@ class AuthServiceImplTest {
     private PasswordResetTokenRepository passwordResetTokenRepository;
 
     @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -64,9 +69,11 @@ class AuthServiceImplTest {
                 userRepository,
                 verificationCodeRepository,
                 passwordResetTokenRepository,
+                refreshTokenRepository,
                 passwordEncoder,
                 jwtService,
-                emailService
+                emailService,
+                java.util.concurrent.TimeUnit.DAYS.toMillis(30)
         );
     }
 
@@ -197,6 +204,112 @@ class AuthServiceImplTest {
 
         assertThrows(UnauthorizedException.class,
                 () -> authService.login(new LoginRequest("jane@example.com", "password123")));
+    }
+
+    @Test
+    @DisplayName("login: stores a refresh token next to the access token it hands back")
+    void login_storesRefreshToken() {
+        stubSharedDependencies();
+        User user = buildUser("jane@example.com", true);
+        when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password123", "stored-hash")).thenReturn(true);
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        AuthResponse response = authService.login(new LoginRequest("jane@example.com", "password123"));
+
+        assertThat(response.refreshToken()).hasSize(64);
+        ArgumentCaptor<RefreshToken> captor = ArgumentCaptor.forClass(RefreshToken.class);
+        verify(refreshTokenRepository).save(captor.capture());
+        assertThat(captor.getValue().getToken()).isEqualTo(response.refreshToken());
+        assertThat(captor.getValue().getUser()).isSameAs(user);
+        assertThat(captor.getValue().getExpiresAt()).isAfter(LocalDateTime.now().plusDays(29));
+    }
+
+    @Test
+    @DisplayName("refresh: spends the presented token and returns a new pair")
+    void refresh_validToken_spendsItAndIssuesNewCredentials() {
+        stubSharedDependencies();
+        User user = buildUser("jane@example.com", true);
+        RefreshToken presented = new RefreshToken.Builder()
+                .setUser(user)
+                .setToken("presented-token")
+                .setExpiresAt(LocalDateTime.now().plusDays(30))
+                .build();
+        when(refreshTokenRepository.findByTokenAndUsedFalse("presented-token"))
+                .thenReturn(Optional.of(presented));
+        when(refreshTokenRepository.spendIfUnused(eq("presented-token"), any(LocalDateTime.class)))
+                .thenReturn(1);
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        AuthResponse response = authService.refresh("presented-token");
+
+        assertEquals("jwt-token", response.token());
+        assertThat(response.refreshToken()).isNotBlank().isNotEqualTo("presented-token");
+        verify(refreshTokenRepository).spendIfUnused(eq("presented-token"), any(LocalDateTime.class));
+        // One save, and it is the replacement token: the presented one is spent, not rewritten.
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("refresh: a token somebody else has just spent answers like an unknown one")
+    void refresh_tokenSpentByAConcurrentExchange_throwsUnauthorized() {
+        User user = buildUser("jane@example.com", true);
+        RefreshToken presented = new RefreshToken.Builder()
+                .setUser(user)
+                .setToken("presented-token")
+                .setExpiresAt(LocalDateTime.now().plusDays(30))
+                .build();
+        when(refreshTokenRepository.findByTokenAndUsedFalse("presented-token"))
+                .thenReturn(Optional.of(presented));
+        // The row looked live when it was read; by the time the database is asked to spend it,
+        // the other request has already got there.
+        when(refreshTokenRepository.spendIfUnused(eq("presented-token"), any(LocalDateTime.class)))
+                .thenReturn(0);
+
+        UnauthorizedException caught = assertThrows(UnauthorizedException.class,
+                () -> authService.refresh("presented-token"));
+
+        assertEquals("Session expired. Please sign in again", caught.getMessage());
+        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("refresh: an unknown token answers with the sign-in message")
+    void refresh_unknownToken_throwsUnauthorized() {
+        when(refreshTokenRepository.findByTokenAndUsedFalse("nope")).thenReturn(Optional.empty());
+
+        UnauthorizedException caught = assertThrows(UnauthorizedException.class,
+                () -> authService.refresh("nope"));
+
+        assertEquals("Session expired. Please sign in again", caught.getMessage());
+    }
+
+    @Test
+    @DisplayName("refresh: an expired but unused token is refused rather than renewed")
+    void refresh_expiredToken_throwsUnauthorized() {
+        RefreshToken expired = new RefreshToken.Builder()
+                .setUser(buildUser("jane@example.com", true))
+                .setToken("stale-token")
+                .setExpiresAt(LocalDateTime.now().minusMinutes(1))
+                .build();
+        when(refreshTokenRepository.findByTokenAndUsedFalse("stale-token"))
+                .thenReturn(Optional.of(expired));
+
+        assertThrows(UnauthorizedException.class, () -> authService.refresh("stale-token"));
+
+        assertThat(expired.isUsed()).isFalse();
+        verify(refreshTokenRepository, never()).spendIfUnused(anyString(), any(LocalDateTime.class));
+        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("refresh: a blank token is a bad request rather than a lookup")
+    void refresh_blankToken_throwsBadRequest() {
+        assertThrows(BadRequestException.class, () -> authService.refresh("  "));
+
+        verify(refreshTokenRepository, never()).findByTokenAndUsedFalse(anyString());
     }
 
     @Test
@@ -354,6 +467,21 @@ class AuthServiceImplTest {
     }
 
     @Test
+    @DisplayName("changePassword: drops every refresh token the account holds")
+    void changePassword_revokesOutstandingSessions() {
+        stubSharedDependencies();
+        UUID callerId = UUID.randomUUID();
+        User user = buildUser("jane@example.com", true);
+        when(userRepository.findById(callerId)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("stored-hash", "stored-hash")).thenReturn(true);
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        authService.changePassword(callerId, "stored-hash", "brandNew123");
+
+        verify(refreshTokenRepository).deleteByUserId(user.getId());
+    }
+
+    @Test
     @DisplayName("changePassword: rejects a wrong current password with unauthorized")
     void changePassword_wrongCurrentPassword_throwsUnauthorized() {
         UUID callerId = UUID.randomUUID();
@@ -364,6 +492,9 @@ class AuthServiceImplTest {
         assertThrows(UnauthorizedException.class,
                 () -> authService.changePassword(callerId, "wrong", "brandNew123"));
         verify(userRepository, never()).save(any(User.class));
+        // A refused change logs nobody out: the sessions were valid a moment ago and nothing about
+        // the attempt has changed that.
+        verify(refreshTokenRepository, never()).deleteByUserId(any(UUID.class));
     }
 
     @Test

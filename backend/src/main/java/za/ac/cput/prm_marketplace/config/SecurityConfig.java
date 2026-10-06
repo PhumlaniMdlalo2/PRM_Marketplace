@@ -90,9 +90,13 @@ public class SecurityConfig {
                         .authenticated()
                         // Only the endpoints that must work before a caller has a token. Note that
                         // change-password is deliberately absent: it requires an authenticated caller.
+                        // refresh belongs here for a reason that is easy to get wrong: the access
+                        // token it renews is the very thing that just expired, so requiring one to
+                        // ask for another would lock the caller out of renewing.
                         .requestMatchers(
                                 "/api/auth/register",
                                 "/api/auth/login",
+                                "/api/auth/refresh",
                                 "/api/auth/verify",
                                 "/api/auth/resend-code",
                                 "/api/auth/forgot-password",

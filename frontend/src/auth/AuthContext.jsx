@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as authApi from '../api/auth';
-import { readToken, setUnauthorizedHandler, writeToken } from '../api/client';
+import {
+  clearSession, readToken, setSessionRefreshHandler, setUnauthorizedHandler, writeRefreshToken, writeToken,
+} from '../api/client';
 import { AuthContext } from './auth-context';
 
 const USER_STORAGE_KEY = 'prm.user';
@@ -37,28 +39,42 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(readToken);
 
   const signOut = useCallback(() => {
-    writeToken(null);
+    clearSession();
     persistUser(null);
     setToken(null);
     setUser(null);
   }, []);
 
-  // The axios interceptor calls this when the server rejects the token, so an expired session
-  // clears itself without the component that happened to make the failing request knowing why.
+  // The axios interceptor calls this only when the session has run out for good: the server would
+  // not renew it, or there was nothing left to renew with. An expired access token does not land
+  // here — the interceptor renews it underneath whichever request noticed first. What arrives is
+  // the tail end of a session, so an expired one clears itself without the component that happened
+  // to make the failing request knowing why.
   useEffect(() => {
     setUnauthorizedHandler(() => signOut());
-    return () => setUnauthorizedHandler(null);
+    // The same interception point, on its way back up: storage holds the new credentials already,
+    // and this is where React's copy of them is brought back into step.
+    setSessionRefreshHandler((authResponse) => {
+      persistUser(authResponse.user);
+      setUser(authResponse.user);
+      setToken(authResponse.token);
+    });
+    return () => {
+      setUnauthorizedHandler(null);
+      setSessionRefreshHandler(null);
+    };
   }, [signOut]);
 
   /**
-   * Stores the token and user from a login or verify response.
+   * Stores the token, refresh token and user from a login response.
    *
-   * `persistent` decides which browser store the token lands in. Note that a session-scoped token is
-   * also read back by the interceptor, so un-ticking "remember me" shortens the session's life
+   * `persistent` decides which browser store both of them land in. Note that a session-scoped token
+   * is also read back by the interceptor, so un-ticking "remember me" shortens the session's life
    * without breaking anything while the tab stays open.
    */
   const adoptSession = useCallback((authResponse, { persistent = true } = {}) => {
     writeToken(authResponse.token, { persistent });
+    writeRefreshToken(authResponse.refreshToken, { persistent });
     persistUser(authResponse.user);
     setToken(authResponse.token);
     setUser(authResponse.user);
