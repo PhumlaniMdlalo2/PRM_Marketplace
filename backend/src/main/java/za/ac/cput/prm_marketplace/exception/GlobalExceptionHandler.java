@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -124,6 +126,34 @@ public class GlobalExceptionHandler {
                 ? "This endpoint accepts application/json"
                 : "This endpoint accepts " + ex.getSupportedMediaTypes();
         return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, supported, request, null);
+    }
+
+    /**
+     * A file larger than the multipart limit is refused while the request is still being parsed,
+     * before the upload service can apply its own size rule. Without this the catch-all below
+     * answered 500 for what is a very ordinary "that photo is too big", and logged it as a server
+     * fault.
+     *
+     * <p>The message deliberately does not restate the limit: the number the container enforced
+     * here (6 MB, a backstop) sits above the rule the service enforces (5 MB), and quoting the
+     * wrong one would leave two different answers to the same question. Everything at or below
+     * the container's ceiling reaches the service and gets the precise message there.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Object> handleMaxUploadSize(MaxUploadSizeExceededException ex,
+                                                      HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, "That image is too large to upload", request, null);
+    }
+
+    /**
+     * A multipart body the container could not parse at all - truncated, malformed, or with a
+     * part that is not a file. Also the caller's mistake rather than a fault here, so it is a 400
+     * and the parser's internal text stays out of the response.
+     */
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<Object> handleMultipart(MultipartException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, "That upload could not be read. Try another file",
+                request, null);
     }
 
     @ExceptionHandler(Exception.class)

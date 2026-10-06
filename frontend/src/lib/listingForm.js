@@ -34,6 +34,7 @@ export const emptyListingForm = () => ({
   location: '',
   condition: 'NEW',
   active: true,
+  imageUrl: '',
 });
 
 /**
@@ -61,6 +62,8 @@ export const listingFromProduct = (product) => ({
   location: formatLocation(product),
   condition: product.condition ?? 'NEW',
   active: product.active ?? true,
+  // A listing without a photo stores null; the form holds '' so the field is always a string.
+  imageUrl: product.imageUrl ?? '',
 });
 
 /**
@@ -69,11 +72,12 @@ export const listingFromProduct = (product) => ({
  * No `active` field: the server ignores it on update, so sending it would look like it worked while
  * doing nothing. Retiring is a separate call, which EditListing makes after saving.
  *
- * `imageUrl` is passed in by the caller because a create has none while an edit must hand back the
- * stored one - the server replaces that field with whatever non-null value it is given, including an
- * empty string, so omitting it is not the way to leave it alone.
+ * `imageUrl` travels with the rest of the values rather than being spliced in by the caller: it
+ * starts as whatever the listing already has and becomes the new address when a photo is uploaded.
+ * It is always sent, because the server replaces the field with whatever non-null value it is
+ * given, including an empty string — omitting it is not the way to leave it alone.
  */
-export const toListingPayload = (values, { imageUrl = '' } = {}) => {
+export const toListingPayload = (values) => {
   const { city, province } = parseLocation(values.location);
   return {
     name: values.name.trim(),
@@ -84,7 +88,7 @@ export const toListingPayload = (values, { imageUrl = '' } = {}) => {
     condition: values.condition,
     city,
     province,
-    imageUrl,
+    imageUrl: values.imageUrl,
   };
 };
 

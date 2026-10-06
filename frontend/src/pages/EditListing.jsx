@@ -7,6 +7,7 @@ import ListingEditor from '../components/listing/ListingEditor';
 import Layout from '../components/layout/Layout';
 import { useAsync } from '../hooks/useAsync';
 import { getById, reactivate, retire, update } from '../api/products';
+import { uploadImage } from '../api/uploads';
 import { listingFromProduct, toListingPayload, validateListing } from '../lib/listingForm';
 
 /**
@@ -22,10 +23,27 @@ const EditListingForm = ({ product }) => {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
   const handleChange = (name, value) => {
     setValues((current) => ({ ...current, [name]: value }));
     setErrors((current) => (current[name] ? { ...current, [name]: undefined } : current));
+  };
+
+  // Replacing the photo is done by uploading first and saving second, so the address in the values
+  // is always the one this listing will carry. A failed upload leaves the stored photo alone and
+  // never blocks saving the rest of the form.
+  const handlePickImage = async (file) => {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      handleChange('imageUrl', await uploadImage(file));
+    } catch (error) {
+      setUploadError(error.message || 'The photo could not be uploaded. The listing keeps its current one.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -37,9 +55,11 @@ const EditListingForm = ({ product }) => {
 
     setSubmitting(true);
     try {
-      // imageUrl is echoed back rather than omitted: the server replaces that field with whatever
-      // non-null value it is given, so leaving it out of the body would wipe the stored address.
-      await update(product.id, toListingPayload(values, { imageUrl: product.imageUrl }));
+      // imageUrl is in the values like every other field: it starts as whatever the listing
+      // already has and becomes the new address when a photo is uploaded. It is always sent,
+      // because the server replaces the field with whatever non-null value it is given, so
+      // leaving it out of the body would wipe the stored address.
+      await update(product.id, toListingPayload(values));
 
       // Retirement is a separate call because the server ignores active on update. Only made when
       // the box actually moved, so saving an unrelated typo does not fire a second request.
@@ -66,7 +86,9 @@ const EditListingForm = ({ product }) => {
       submitting={submitting}
       submitError={submitError}
       submitLabel="Save changes"
-      imageUrl={product.imageUrl}
+      onPickImage={handlePickImage}
+      uploading={uploading}
+      uploadError={uploadError}
       showRetire
     />
   );

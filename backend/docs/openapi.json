@@ -801,6 +801,39 @@
         }
       }
     },
+    "/api/uploads/images" : {
+      "post" : {
+        "tags" : [ "upload-controller" ],
+        "operationId" : "uploadImage",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "properties" : {
+                  "file" : {
+                    "type" : "string",
+                    "format" : "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ImageUploadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/saved-items/product/{productId}/toggle" : {
       "post" : {
         "tags" : [ "saved-item-controller" ],
@@ -3817,6 +3850,14 @@
             "type" : "string",
             "format" : "date-time",
             "readOnly" : true
+          }
+        }
+      },
+      "ImageUploadResponse" : {
+        "type" : "object",
+        "properties" : {
+          "url" : {
+            "type" : "string"
           }
         }
       },

@@ -14,6 +14,8 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import za.ac.cput.prm_marketplace.dto.ApiError;
 
 import java.util.List;
@@ -180,6 +182,29 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
         assertThat(body(response).message()).contains("application/json");
+    }
+
+    @Test
+    @DisplayName("an image over the multipart limit is a 400, not a server fault")
+    void maxUploadSize_mapsTo400() {
+        MaxUploadSizeExceededException ex = new MaxUploadSizeExceededException(
+                6_291_456L, new IllegalStateException("Size exceeded for multipart part"));
+
+        ResponseEntity<Object> response = handler.handleMaxUploadSize(ex, request());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(body(response).message()).isEqualTo("That image is too large to upload");
+    }
+
+    @Test
+    @DisplayName("a multipart body that will not parse is a 400 without the parser's text")
+    void multipartFailure_mapsTo400() {
+        ResponseEntity<Object> response = handler.handleMultipart(
+                new MultipartException("Failed to parse multipart request"), request());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(body(response).message()).contains("could not be read");
+        assertThat(body(response).message()).doesNotContain("Failed to parse");
     }
 
     @Test

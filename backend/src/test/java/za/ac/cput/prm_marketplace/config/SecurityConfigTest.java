@@ -195,6 +195,27 @@ class SecurityConfigTest {
     }
 
     @Test
+    @DisplayName("putting an image up requires a signed-in caller")
+    void imageUpload_requiresAuthentication() throws Exception {
+        // The public rule below admits GET only. If this answered anything but 401 the matcher
+        // would have opened the write side too, and any anonymous caller could fill the disk.
+        mockMvc.perform(multipart("/api/uploads/images"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("stored photographs are readable without a token, so listings render signed out")
+    void storedImages_areReadableWithoutAToken() throws Exception {
+        // 404 rather than 401 is the point: security runs before routing, so a path no matcher
+        // admits would answer 401. The file itself does not exist, which means the GET matcher
+        // covered the path and the request reached the resource mapping behind it. An <img> tag
+        // never sends an Authorization header, so anything less than this would blank every
+        // listing photograph for a signed-out reader.
+        mockMvc.perform(get("/api/uploads/images/no-such-file.png"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("the seller directory stays readable without a token")
     void publicVendorReads_stayPublic() throws Exception {
         // Narrowing "me" must not have narrowed the directory it is served from.

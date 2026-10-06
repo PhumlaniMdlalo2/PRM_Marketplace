@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MapPin, Package } from 'lucide-react';
+import { Camera, MapPin, Package } from 'lucide-react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { CATEGORY_OPTIONS, CONDITION_OPTIONS } from '../../lib/listingForm';
@@ -11,6 +11,10 @@ import { CATEGORY_OPTIONS, CONDITION_OPTIONS } from '../../lib/listingForm';
  * pages stay responsible for their own load, validation timing and navigation. Callers mount it with
  * a `key` tied to the product id, which is what lets it take its initial values straight from props
  * instead of copying them into state from an effect after the data lands.
+ *
+ * The photo picker follows the same rule: the file input hands the chosen file up through
+ * `onPickImage` and renders whatever address the values hold — the upload itself, and its failure,
+ * belong to the page.
  */
 const ListingEditor = ({
   values,
@@ -20,7 +24,9 @@ const ListingEditor = ({
   submitting = false,
   submitError,
   submitLabel,
-  imageUrl,
+  onPickImage,
+  uploading = false,
+  uploadError,
   showRetire = false,
 }) => {
   // A saved product can already carry a category that is not one of the suggestions, in which case
@@ -36,29 +42,52 @@ const ListingEditor = ({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4" noValidate>
-      {imageUrl ? (
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-text-primary mb-2">Product image</label>
-          <div className="aspect-video bg-lavender rounded-2xl overflow-hidden">
+      <div className="mb-6">
+        <label htmlFor="listing-image" className="block text-sm font-medium text-text-primary mb-2">
+          Product image
+        </label>
+        {values.imageUrl ? (
+          <div className="aspect-video bg-lavender rounded-2xl overflow-hidden mb-3">
             <img
-              src={imageUrl}
+              src={values.imageUrl}
               alt={values.name || 'Listing image'}
               className="w-full h-full object-cover"
             />
           </div>
-        </div>
-      ) : (
-        // The image routes store an imageUrl string, not an uploaded file, and there is no multipart
-        // endpoint anywhere in the backend. So rather than keep a "tap to upload" box that would do
-        // nothing, the slot says what is actually true.
-        <div className="mb-6 flex items-start gap-3 rounded-2xl bg-lavender px-4 py-3">
-          <Package size={18} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-          <p className="text-sm text-text-secondary">
-            Photos cannot be added yet: the server stores an image address rather than an uploaded
-            file. The listing works without one.
+        ) : (
+          <div className="mb-3 flex items-start gap-3 rounded-2xl bg-lavender px-4 py-3">
+            <Camera size={18} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+            <p className="text-sm text-text-secondary">
+              No photo yet. Pick one below — a listing with a photo sells better, but this one
+              still works without one.
+            </p>
+          </div>
+        )}
+        <input
+          id="listing-image"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Cleared straight away so choosing the same photo twice still registers: a change
+            // event needs the input's value to have moved.
+            event.target.value = '';
+            if (file) onPickImage(file);
+          }}
+          disabled={uploading}
+          className="block w-full text-sm text-text-secondary file:mr-3 file:cursor-pointer file:rounded-full file:border-0 file:bg-lavender file:px-4 file:py-2 file:text-sm file:font-medium file:text-text-primary hover:file:bg-primary/10"
+        />
+        {uploading && (
+          <p className="mt-1 text-sm text-text-secondary" role="status">
+            Uploading photo…
           </p>
-        </div>
-      )}
+        )}
+        {uploadError && (
+          <p className="mt-1 text-sm text-error" role="alert">
+            &bull; {uploadError}
+          </p>
+        )}
+      </div>
 
       <Input label="Product name" placeholder="Enter a descriptive title" {...field('name')} />
 

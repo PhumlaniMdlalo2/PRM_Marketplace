@@ -122,7 +122,12 @@ public class SecurityConfig {
                                 "/api/comments/**",
                                 "/api/bulletin-posts/**",
                                 "/api/reviews/**",
-                                "/api/vendor-profiles/**")
+                                "/api/vendor-profiles/**",
+                                // Stored photographs. A listing's picture is meant to be seen by
+                                // anyone who can see the listing, so reading needs no token - but
+                                // this matcher admits GET only, and POST /api/uploads/images does
+                                // not match it, so putting a file up still needs to be signed in.
+                                "/api/uploads/images/**")
                         .permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling

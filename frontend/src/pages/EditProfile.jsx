@@ -93,9 +93,10 @@ const EditProfile = () => {
         <div className="flex justify-center mb-8">
           <div className="relative">
             <Avatar src={formData.avatarUrl.trim() || undefined} alt={formData.name} size="xl" />
-            {/* No camera button here any more. There is no image upload endpoint anywhere in the API —
-                avatars are a URL, and a button that opened a file picker would have had nowhere to
-                put the file. The URL field below is the honest version of the same idea. */}
+            {/* No camera button here any more. Avatars are still an address rather than an upload:
+                the field is validated as an http(s) URL, so a file picker would have had nowhere to
+                put its result. Listing photos do upload — see the listing form — but changing that
+                for avatars would mean changing what this field means everywhere it is read. */}
             <span
               className="absolute bottom-0 right-0 w-9 h-9 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/30"
               aria-hidden="true"

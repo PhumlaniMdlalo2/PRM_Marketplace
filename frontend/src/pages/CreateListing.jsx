@@ -9,6 +9,7 @@ import { useAsync } from '../hooks/useAsync';
 import { create } from '../api/products';
 import { getMyVendorProfile } from '../api/vendorProfile';
 import { useAuth } from '../auth/useAuth';
+import { uploadImage } from '../api/uploads';
 import { emptyListingForm, toListingPayload, validateListing } from '../lib/listingForm';
 
 /**
@@ -25,6 +26,8 @@ const CreateListing = () => {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
   const loadSeller = useCallback(() => getMyVendorProfile(), []);
   const { loading, error: sellerError } = useAsync(loadSeller);
@@ -32,6 +35,21 @@ const CreateListing = () => {
   const handleChange = (name, value) => {
     setValues((current) => ({ ...current, [name]: value }));
     setErrors((current) => (current[name] ? { ...current, [name]: undefined } : current));
+  };
+
+  // The photo is stored before the listing exists, and its address rides in the values like any
+  // other field. A failed upload never blocks publishing: the listing is valid without one, so the
+  // message says what happened and the form carries on with an empty address.
+  const handlePickImage = async (file) => {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      handleChange('imageUrl', await uploadImage(file));
+    } catch (error) {
+      setUploadError(error.message || 'The photo could not be uploaded. The listing works without one.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -106,6 +124,9 @@ const CreateListing = () => {
             submitting={submitting}
             submitError={submitError}
             submitLabel="Create listing"
+            onPickImage={handlePickImage}
+            uploading={uploading}
+            uploadError={uploadError}
           />
         )}
       </div>
