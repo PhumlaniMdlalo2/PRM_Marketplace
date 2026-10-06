@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import ReviewsSection from '../components/review/ReviewsSection';
+import { AuthProvider } from '../auth/AuthContext';
 import { createReview, deleteReview, updateReview } from '../api/products';
 
 /**
@@ -40,15 +42,22 @@ const renderSection = ({
   onChanged = vi.fn().mockResolvedValue(undefined),
   requireSignIn = vi.fn(),
 } = {}) => {
+  // AuthProvider and the router are here for the report control that sits under somebody else's
+  // review: it reads the session to decide whether to file or to send the reader to sign in, and
+  // it navigates when it does the latter.
   render(
-    <ReviewsSection
-      productId={PRODUCT_ID}
-      reviews={reviews}
-      onChanged={onChanged}
-      isAuthenticated={isAuthenticated}
-      currentUserId={currentUserId}
-      requireSignIn={requireSignIn}
-    />,
+    <MemoryRouter>
+      <AuthProvider>
+        <ReviewsSection
+          productId={PRODUCT_ID}
+          reviews={reviews}
+          onChanged={onChanged}
+          isAuthenticated={isAuthenticated}
+          currentUserId={currentUserId}
+          requireSignIn={requireSignIn}
+        />
+      </AuthProvider>
+    </MemoryRouter>,
   );
   return { onChanged, requireSignIn };
 };

@@ -4,6 +4,7 @@ import { MessageCircle, Pencil, Send, ThumbsUp, Trash2 } from 'lucide-react';
 import Avatar from '../components/ui/Avatar';
 import BackButton from '../components/ui/BackButton';
 import Button from '../components/ui/Button';
+import ReportControl from '../components/report/ReportControl';
 import Layout from '../components/layout/Layout';
 import {
   createComment,
@@ -413,6 +414,16 @@ const PostComments = () => {
                   )}
                 </div>
               )}
+              {/* Same rule as the post above it: you can only complain about what somebody else
+                  wrote, and the id is already in this row rather than something to look up. */}
+              {!owns(comment.authorId) && (
+                <ReportControl
+                  targetType="COMMENT"
+                  targetId={comment.id}
+                  label="Report this comment"
+                  className="mt-1.5"
+                />
+              )}
             </>
           )}
         </div>
@@ -582,6 +593,15 @@ const PostComments = () => {
                     <span className="text-sm font-medium">{post.comments}</span>
                   </span>
                 </div>
+
+                {!owns(post.authorId) && (
+                  <ReportControl
+                    targetType="BULLETIN_POST"
+                    targetId={id}
+                    label="Report this post"
+                    className="mt-3"
+                  />
+                )}
               </div>
             </div>
           </article>

@@ -6,6 +6,7 @@ import Avatar from '../components/ui/Avatar';
 import BackButton from '../components/ui/BackButton';
 import ProductCard from '../components/ui/ProductCard';
 import Layout from '../components/layout/Layout';
+import ReportControl from '../components/report/ReportControl';
 import ReviewsSection from '../components/review/ReviewsSection';
 import { getById, listByCategory, listReviews } from '../api/products';
 import { addCartItem } from '../api/cart';
@@ -272,6 +273,17 @@ const ProductDetails = () => {
                     <p className="text-xs font-medium text-primary mt-1.5">View shop</p>
                   </div>
                 </Link>
+              )}
+
+              {/* The id is on this page already, and a seller does not file complaints about
+                  their own listing. */}
+              {product.id && !isOwnListing && (
+                <ReportControl
+                  targetType="PRODUCT"
+                  targetId={product.id}
+                  label="Report this listing"
+                  className="mt-3 flex justify-end"
+                />
               )}
             </div>
           </div>

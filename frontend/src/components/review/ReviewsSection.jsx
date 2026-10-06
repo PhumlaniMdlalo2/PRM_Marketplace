@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Pencil, Send, Star, Trash2, X } from 'lucide-react';
+import ReportControl from '../report/ReportControl';
 import Button from '../ui/Button';
 import { createReview, deleteReview, updateReview } from '../../api/products';
 
@@ -93,6 +94,16 @@ const ReviewCard = ({ review, isMine, onEdit, onDelete }) => (
         <p className="mt-1.5 text-sm text-text-secondary leading-relaxed break-words">
           {review.comment}
         </p>
+        {/* Your own review is yours to edit or withdraw, so the only complaint left to file about
+            it would be against yourself. */}
+        {!isMine && (
+          <ReportControl
+            targetType="REVIEW"
+            targetId={review.id}
+            label="Report this review"
+            className="mt-2"
+          />
+        )}
       </div>
 
       {/* No name is shown for anyone but the reader: the API carries the reviewer's id and

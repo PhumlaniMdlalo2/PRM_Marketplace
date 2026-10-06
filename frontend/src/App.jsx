@@ -20,6 +20,7 @@ import Settings from './pages/Settings';
 import SavedItems from './pages/SavedItems';
 import Vendors from './pages/Vendors';
 import VendorStore from './pages/VendorStore';
+import Moderation from './pages/Moderation';
 import CreateListing from './pages/CreateListing';
 import EditListing from './pages/EditListing';
 import MyListings from './pages/MyListings';
@@ -65,6 +66,9 @@ function App() {
         <Route path="/profile" element={protectedPage(<Profile />)} />
         <Route path="/profile/edit" element={protectedPage(<EditProfile />)} />
         <Route path="/settings" element={protectedPage(<Settings />)} />
+        {/* Behind a login like every other page a reader has a personal stake in; the queue itself
+            then checks the role, because faculty accounts are decided by the server. */}
+        <Route path="/moderation" element={protectedPage(<Moderation />)} />
         <Route path="/saved" element={protectedPage(<SavedItems />)} />
         <Route path="/listing/create" element={protectedPage(<CreateListing />)} />
         <Route path="/listing/edit/:id" element={protectedPage(<EditListing />)} />

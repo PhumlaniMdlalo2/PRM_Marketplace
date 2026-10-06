@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, ChevronDown, LogOut, MapPin, Shield, Store, User,
+  AlertCircle, ChevronDown, Gavel, LogOut, MapPin, Shield, Store, User,
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -441,7 +441,8 @@ const ReportProblemPanel = () => {
               <span className="font-medium text-text-primary">{report.targetType}</span>
               <span className="text-text-muted"> · {report.reason}</span>
               <span className="block text-xs text-text-muted mt-0.5">
-                {report.resolved ? 'Resolved' : `Status: ${report.status}`}
+                {STATUS_LABELS[report.status] ?? report.status}
+                {report.resolutionNotes ? ` · ${report.resolutionNotes}` : ''}
               </span>
             </li>
           ))}
@@ -452,19 +453,19 @@ const ReportProblemPanel = () => {
         <div>
           <label className="block text-sm font-medium text-text-primary mb-1.5">What is it about</label>
           <div className="flex flex-wrap gap-2">
-            {['PRODUCT', 'USER', 'MESSAGE', 'OTHER'].map((option) => (
+            {TARGET_OPTIONS.map((option) => (
               <button
-                key={option}
+                key={option.value}
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, targetType: option }))}
-                aria-pressed={form.targetType === option}
+                onClick={() => setForm((f) => ({ ...f, targetType: option.value }))}
+                aria-pressed={form.targetType === option.value}
                 className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 active:scale-95 ${
-                  form.targetType === option
+                  form.targetType === option.value
                     ? 'bg-primary text-white shadow-md shadow-primary/20'
                     : 'bg-white border border-border text-text-primary hover:bg-lavender'
                 }`}
               >
-                {option.toLowerCase()}
+                {option.label}
               </button>
             ))}
           </div>
@@ -497,6 +498,22 @@ const ReportProblemPanel = () => {
 };
 
 const section = 'bg-white border border-border rounded-2xl overflow-hidden divide-y divide-border';
+
+/** What a report is about, in the same words the moderation queue uses for it. */
+const TARGET_OPTIONS = [
+  { value: 'PRODUCT', label: 'listing' },
+  { value: 'USER', label: 'account' },
+  { value: 'MESSAGE', label: 'message' },
+  { value: 'BULLETIN_POST', label: 'post' },
+  { value: 'COMMENT', label: 'comment' },
+  { value: 'REVIEW', label: 'review' },
+];
+
+const STATUS_LABELS = {
+  OPEN: 'Open',
+  UNDER_REVIEW: 'Under review',
+  RESOLVED: 'Resolved',
+};
 
 const Settings = () => {
   const { user, signOut } = useAuth();
@@ -562,11 +579,22 @@ const Settings = () => {
               <Row
                 icon={AlertCircle}
                 label="Report a problem"
+                hint="Anything you cannot report from its own page"
                 expanded={openFor('report')}
                 onToggle={() => toggle('report')}
               >
                 <ReportProblemPanel />
               </Row>
+              {/* The queue is a destination rather than a form, so it carries no chevron — a row
+                  with children promises an expansion that would never come. */}
+              {user?.role === 'FACULTY' && (
+                <Row
+                  icon={Gavel}
+                  label="Moderation"
+                  hint="Reports waiting on a decision"
+                  onToggle={() => navigate('/moderation')}
+                />
+              )}
             </div>
           </section>
 
