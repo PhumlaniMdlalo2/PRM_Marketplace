@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -170,6 +171,154 @@ class PaymentServiceImplTest {
 
         assertThat(paymentService.create(request, payerId)).isNull();
         verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an omitted amount on a part paid order settles what is left, not the total again")
+    void create_coversOnlyTheRemainingBalance() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.PENDING, "500.00"));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment request = new Payment.Builder()
+                .setOrderId(orderId).setMethod(PaymentMethod.EFT).build();
+
+        Payment saved = paymentService.create(request, payerId);
+
+        assertThat(saved.getAmount())
+                .as("paying the 780 total again would take R1260 for goods worth R780")
+                .isEqualByComparingTo("280.00");
+    }
+
+    @Test
+    @DisplayName("a second attempt cannot restate the whole total")
+    void create_rejectsAnAmountAboveTheRemainingBalance() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.PENDING, "500.00"));
+
+        Payment request = new Payment.Builder()
+                .setOrderId(orderId)
+                .setAmount(new BigDecimal("780.00"))
+                .setMethod(PaymentMethod.EFT)
+                .build();
+
+        assertThat(paymentService.create(request, payerId)).isNull();
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an attempt that exactly clears the balance is accepted")
+    void create_acceptsAnAmountEqualToTheRemainingBalance() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.PENDING, "500.00"));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment request = new Payment.Builder()
+                .setOrderId(orderId)
+                .setAmount(new BigDecimal("280.00"))
+                .setMethod(PaymentMethod.EFT)
+                .build();
+
+        assertThat(paymentService.create(request, payerId)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("nothing more can be filed against a fully paid order")
+    void create_rejectsAnythingOnceTheOrderIsSettled() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.COMPLETED, "780.00"));
+
+        Payment withAmount = new Payment.Builder()
+                .setOrderId(orderId)
+                .setAmount(new BigDecimal("10.00"))
+                .setMethod(PaymentMethod.EFT)
+                .build();
+        Payment withoutAmount = new Payment.Builder()
+                .setOrderId(orderId).setMethod(PaymentMethod.EFT).build();
+
+        assertThat(paymentService.create(withAmount, payerId)).isNull();
+        assertThat(paymentService.create(withoutAmount, payerId)).isNull();
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a refunded payment no longer counts towards what the order owes")
+    void create_ignoresARefundedPaymentWhenWorkingOutTheBalance() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.REFUNDED, "780.00"));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment request = new Payment.Builder()
+                .setOrderId(orderId).setMethod(PaymentMethod.EFT).build();
+
+        assertThat(paymentService.create(request, payerId).getAmount())
+                .as("the money came back, so the order is owed the full amount again")
+                .isEqualByComparingTo("780.00");
+    }
+
+    @Test
+    @DisplayName("a failed attempt does not block paying again")
+    void create_ignoresAFailedPaymentWhenWorkingOutTheBalance() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+        givenCommittedPayments(committed(PaymentStatus.FAILED, "780.00"));
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment request = new Payment.Builder()
+                .setOrderId(orderId).setMethod(PaymentMethod.EFT).build();
+
+        assertThat(paymentService.create(request, payerId).getAmount())
+                .isEqualByComparingTo("780.00");
+    }
+
+    @Test
+    @DisplayName("only payments that still claim the money are asked about")
+    void create_asksOnlyForTheStatusesThatOweSomething() {
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "780.00")));
+
+        paymentService.create(new Payment.Builder()
+                .setOrderId(orderId).setMethod(PaymentMethod.EFT).build(), payerId);
+
+        verify(paymentRepository).findByOrderIdAndStatusIn(orderId,
+                List.of(PaymentStatus.PENDING, PaymentStatus.COMPLETED));
+    }
+
+    /**
+     * Answers the committed-payments lookup the way the database does, by filtering the rows it was
+     * given down to the statuses the caller asked for. Returning them unfiltered would quietly assert
+     * that a refunded payment still counts towards the balance, which is the opposite of the intent.
+     */
+    private void givenCommittedPayments(Payment... payments) {
+        when(paymentRepository.findByOrderIdAndStatusIn(eq(orderId), anyList()))
+                .thenAnswer(invocation -> {
+                    List<PaymentStatus> wanted = invocation.getArgument(1);
+                    return List.of(payments).stream()
+                            .filter(payment -> wanted.contains(payment.getStatus()))
+                            .toList();
+                });
+    }
+
+    private Payment committed(PaymentStatus status, String amount) {
+        return new Payment.Builder()
+                .setId(UUID.randomUUID())
+                .setOrderId(orderId)
+                .setUserId(payerId)
+                .setAmount(new BigDecimal(amount))
+                .setMethod(PaymentMethod.CARD)
+                .setStatus(status)
+                .setTransactionReference("PAY-" + UUID.randomUUID())
+                .setCreatedAt(LocalDateTime.now())
+                .build();
     }
 
     @Test

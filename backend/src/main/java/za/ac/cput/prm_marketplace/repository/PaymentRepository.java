@@ -1,6 +1,8 @@
 package za.ac.cput.prm_marketplace.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
 
@@ -16,6 +18,19 @@ import java.util.UUID;
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
     List<Payment> findByOrderId(UUID orderId);
+
+    /**
+     * The payments against one order that still represent money owed or money taken.
+     *
+     * <p>PENDING counts as well as COMPLETED: a pending payment is a claim on the order's total, and
+     * leaving it out would let a buyer file unlimited attempts at the full amount. FAILED and REFUNDED
+     * are excluded, which is what lets a buyer retry after a failed charge or a refund without the
+     * old row still counting against the ceiling.
+     */
+    @Query("select p from Payment p "
+            + "where p.orderId = :orderId and p.status in :statuses")
+    List<Payment> findByOrderIdAndStatusIn(@Param("orderId") UUID orderId,
+                                           @Param("statuses") List<PaymentStatus> statuses);
 
     List<Payment> findByUserIdOrderByCreatedAtDesc(UUID userId);
 

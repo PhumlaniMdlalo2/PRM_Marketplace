@@ -52,7 +52,11 @@ public class PaymentServiceImpl implements IPaymentService {
             return null;
         }
 
-        BigDecimal amount = resolveAmount(payment.getAmount(), order);
+        // The ceiling is per order, not per payment. Without this, an order of R450 accepts any number of
+        // payments of R450 and faculty settling all of them takes R2250 for goods worth R450. What is
+        // left of the total is what the next attempt may cover, so a retry settles a shortfall rather
+        // than the whole total again.
+        BigDecimal amount = resolveAmount(payment.getAmount(), remainingFor(order));
         if (amount == null) {
             return null;
         }
@@ -70,25 +74,54 @@ public class PaymentServiceImpl implements IPaymentService {
     }
 
     /**
-     * An omitted amount means "pay the whole order". A supplied amount is accepted up to the order
-     * total, so a client cannot inflate a payment beyond what it owes.
+     * Turns the requested amount into one that may actually be filed against the order.
      *
-     * <p>This is a ceiling rather than an exact match on purpose. One order can end up carrying
-     * several payments, and nothing in the model records how much has already been paid, so
-     * demanding the exact total would make partial payments impossible to express. Tightening this
-     * to an exact match belongs with the order/settlement work that tracks amounts paid.
+     * <p>An omitted amount means "settle whatever is left", which is why it resolves to the remaining
+     * balance rather than to the order total: on an order that is already part paid, paying the total
+     * again is exactly what this is here to prevent.
+     *
+     * <p>Returns null for everything the caller may not file: an order that is already covered, a
+     * non-positive amount, and an amount larger than what is outstanding.
      */
-    private static BigDecimal resolveAmount(BigDecimal requested, Order order) {
-        BigDecimal total = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
-
-        if (requested == null) {
-            return total.compareTo(BigDecimal.ZERO) > 0 ? total : null;
+    private static BigDecimal resolveAmount(BigDecimal requested, BigDecimal remaining) {
+        if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
         }
 
-        if (requested.compareTo(BigDecimal.ZERO) <= 0 || requested.compareTo(total) > 0) {
+        if (requested == null) {
+            return remaining;
+        }
+
+        if (requested.compareTo(BigDecimal.ZERO) <= 0 || requested.compareTo(remaining) > 0) {
             return null;
         }
         return requested.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * What the order still owes: its total less the payments already committed to it.
+     *
+     * <p>PENDING counts alongside COMPLETED, because an attempt the buyer has filed and faculty has
+     * not yet ruled on is still a claim on the money. A buyer who abandons an attempt therefore needs
+     * faculty to settle it as FAILED before another can be filed, which is the same manual step the
+     * payment status already requires with no gateway attached.
+     *
+     * <p>Read in the caller's transaction and not enforced by a single statement, so two payments
+     * filed at the same instant can both pass this check. That needs a concurrent double submission
+     * from one account, and the honest fix is a locking read or a running total on the order rather
+     * than a subtler version of the same arithmetic here.
+     */
+    private BigDecimal remainingFor(Order order) {
+        BigDecimal total = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
+        BigDecimal committed = BigDecimal.ZERO;
+        for (Payment existing : paymentRepository.findByOrderIdAndStatusIn(order.getId(),
+                List.of(PaymentStatus.PENDING, PaymentStatus.COMPLETED))) {
+            if (existing.getAmount() != null) {
+                committed = committed.add(existing.getAmount());
+            }
+        }
+        BigDecimal remaining = total.subtract(committed);
+        return remaining.compareTo(BigDecimal.ZERO) > 0 ? remaining : BigDecimal.ZERO;
     }
 
     @Override
