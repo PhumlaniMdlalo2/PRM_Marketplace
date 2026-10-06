@@ -1,4 +1,4 @@
-import { Home, Search, Compass, ShoppingCart, MessageSquare, User, LayoutGrid } from 'lucide-react';
+import { Home, Search, Compass, ShoppingCart, MessageSquare, Store, User, LayoutGrid } from 'lucide-react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import NotificationBell from './NotificationBell';
 
@@ -7,6 +7,7 @@ const desktopItems = [
   { icon: Search, label: 'Search', path: '/search', activeWhen: ['/search'] },
   { icon: Compass, label: 'For You', path: '/#for-you', activeWhen: ['/'] },
   { icon: ShoppingCart, label: 'Orders', path: '/orders', activeWhen: ['/orders'] },
+  { icon: Store, label: 'Sellers', path: '/vendors', activeWhen: ['/vendors'] },
   { icon: MessageSquare, label: 'Bulletin', path: '/bulletin', activeWhen: ['/bulletin'] },
   { icon: User, label: 'Profile', path: '/profile', activeWhen: ['/profile'] },
 ];

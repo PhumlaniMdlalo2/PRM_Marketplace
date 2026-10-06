@@ -239,7 +239,10 @@ const ProductDetails = () => {
               )}
 
               {product.vendor && (
-                <div className="mt-7 flex items-center gap-4 p-4 rounded-2xl bg-lavender">
+                <Link
+                  to={`/vendors/${product.vendor.id}`}
+                  className="mt-7 flex items-center gap-4 p-4 rounded-2xl bg-lavender transition-colors hover:bg-lavender-dark"
+                >
                   <Avatar size="lg" alt={product.vendor.businessName} />
                   <div>
                     <p className="font-semibold text-text-primary">
@@ -266,8 +269,9 @@ const ProductDetails = () => {
                         Member since {new Date(product.vendor.createdAt).getFullYear()}
                       </p>
                     )}
+                    <p className="text-xs font-medium text-primary mt-1.5">View shop</p>
                   </div>
-                </div>
+                </Link>
               )}
             </div>
           </div>

@@ -18,6 +18,8 @@ import Profile from './pages/Profile';
 import EditProfile from './pages/EditProfile';
 import Settings from './pages/Settings';
 import SavedItems from './pages/SavedItems';
+import Vendors from './pages/Vendors';
+import VendorStore from './pages/VendorStore';
 import CreateListing from './pages/CreateListing';
 import EditListing from './pages/EditListing';
 import MyListings from './pages/MyListings';
@@ -43,6 +45,9 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/search" element={<Search />} />
         <Route path="/product/:id" element={<ProductDetails />} />
+        {/* Public: the directory is the same audience as the catalogue it sits beside. */}
+        <Route path="/vendors" element={<Vendors />} />
+        <Route path="/vendors/:id" element={<VendorStore />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/verification" element={<Verification />} />

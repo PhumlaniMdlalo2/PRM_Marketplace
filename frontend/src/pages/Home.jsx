@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Sparkles, Store } from 'lucide-react';
 import SearchBar from '../components/ui/SearchBar';
 import CategoryChip from '../components/ui/CategoryChip';
 import ProductCard from '../components/ui/ProductCard';
@@ -92,6 +92,16 @@ const Home = () => {
             />
           ))}
         </div>
+
+        {/* Not a category, so it sits outside the tablist rather than as a chip that would read as
+            one of the product filters. */}
+        <Link
+          to="/vendors"
+          className="mb-3 inline-flex items-center gap-2 rounded-full bg-lavender px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-lavender-dark"
+        >
+          <Store size={16} className="text-primary" />
+          Browse all sellers
+        </Link>
 
         {favourites.error && (
           <p role="alert" className="mb-4 text-sm text-error">

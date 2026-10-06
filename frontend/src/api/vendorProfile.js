@@ -9,6 +9,35 @@ import api from './client';
  */
 
 /**
+ * Every seller profile, for the public directory.
+ *
+ * The route has been open to anyone without a token since the backend was written, and nothing in
+ * the app ever called it: a seller could only be reached by way of one of their listings, so a shop
+ * with nothing listed at that moment did not exist as far as a buyer was concerned.
+ *
+ * The profile's own `user` relation is deliberately not in the body, so a directory entry can say
+ * what a shop is called and how it has been rated, and nothing else about the person behind it.
+ *
+ * @returns {Promise<Array>} the profiles, always an array
+ */
+export const listVendorProfiles = async () => {
+  const response = await api.get('/vendor-profiles');
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+/**
+ * One seller profile.
+ *
+ * @throws {Object} the normalised client error, with `status` 404 when the shop is not on the
+ *   directory — which is how an unknown id arrives, since the route answers 404 rather than an
+ *   empty list.
+ */
+export const getVendorProfile = async (id) => {
+  const response = await api.get(`/vendor-profiles/${id}`);
+  return response.data;
+};
+
+/**
  * The caller's own seller profile.
  *
  * @throws {Object} the normalised client error, with `status` 404 when the account has no seller

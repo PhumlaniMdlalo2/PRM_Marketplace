@@ -34,6 +34,8 @@ const PUBLIC_ROUTES = [
   },
   { path: '/bulletin', landmark: () => screen.findByRole('heading', { name: /bulletin/i }) },
   { path: '/bulletin/7b2b2f9e-0000-4000-8000-000000000001', landmark: null },
+  { path: '/vendors', landmark: () => screen.findByRole('heading', { name: 'Sellers' }) },
+  { path: '/vendors/4a1c5b2e-0000-4000-8000-000000000001', landmark: null },
   { path: '/nope', landmark: null },
 ]
 
