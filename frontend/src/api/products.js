@@ -40,7 +40,40 @@ export const listByCategory = async (category) => {
  */
 export const listReviews = async (productId) => {
   const { data } = await api.get(`/reviews/product/${productId}`);
+  // Always an array. The endpoint is documented as returning a plain list, but anything that is
+  // not one would reach `reviews.map` on the page and take the listing down with it.
+  return Array.isArray(data) ? data : [];
+};
+
+/**
+ * Writes the caller's review of a listing.
+ *
+ * The server insists on three things before it will store one: the caller actually bought the
+ * listing, the rating is between 1 and 5, and the comment fits the column. It answers 400 with an
+ * empty body for all three, so there is no message here to forward — the caller has to be told what
+ * the rule is rather than what happened.
+ *
+ * @returns {Promise<object>} the review as the server stored it
+ */
+export const createReview = async ({ productId, rating, comment }) => {
+  const { data } = await api.post('/reviews', { productId, rating, comment });
   return data;
+};
+
+/**
+ * Changes the rating or comment on the caller's own review.
+ *
+ * The body carries the id because the server's update route takes no path segment; the product and
+ * the reviewer are fixed at creation and are ignored if sent.
+ */
+export const updateReview = async ({ id, rating, comment }) => {
+  const { data } = await api.put('/reviews', { id, rating, comment });
+  return data;
+};
+
+/** Removes the caller's own review. 404 means somebody else's, which the caller cannot delete. */
+export const deleteReview = async (reviewId) => {
+  await api.delete(`/reviews/${reviewId}`);
 };
 
 export const listByVendor = async (vendorId) => {

@@ -6,6 +6,7 @@ import Avatar from '../components/ui/Avatar';
 import BackButton from '../components/ui/BackButton';
 import ProductCard from '../components/ui/ProductCard';
 import Layout from '../components/layout/Layout';
+import ReviewsSection from '../components/review/ReviewsSection';
 import { getById, listByCategory, listReviews } from '../api/products';
 import { addCartItem } from '../api/cart';
 import { startConversation } from '../api/messages';
@@ -30,8 +31,9 @@ const ProductDetails = () => {
 
   // Reviews are a separate endpoint from the product, so they arrive on their own. Used for the
   // review list further down and as the fallback count for sellers whose profile predates the
-  // vendor-wide count on VendorProfile.
-  const { data: reviews } = useAsync(loadReviews);
+  // vendor-wide count on VendorProfile. `run` is handed to the reviews section so a submission
+  // there can reload this list without the whole page refetching.
+  const { data: reviews, run: reloadReviews } = useAsync(loadReviews);
   const reviewCount = reviews?.length ?? 0;
 
   // /api/products/category/{category} takes no query parameters, so there is no server-side
@@ -288,6 +290,15 @@ const ProductDetails = () => {
               </div>
             </div>
           )}
+
+          <ReviewsSection
+            productId={id}
+            reviews={reviews}
+            onChanged={reloadReviews}
+            isAuthenticated={isAuthenticated}
+            currentUserId={user?.id}
+            requireSignIn={requireSignIn}
+          />
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-border p-4 z-40 safe-area-inset-bottom">
