@@ -1,5 +1,6 @@
 import { Home, Search, Compass, ShoppingCart, MessageSquare, User } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
+import NotificationBell from './NotificationBell';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/', activeWhen: ['/'] },
@@ -38,6 +39,8 @@ const BottomNavigation = () => {
             </NavLink>
           );
         })}
+
+        <NotificationBell variant="tab" />
       </div>
     </nav>
   );

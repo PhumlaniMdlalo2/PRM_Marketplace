@@ -1,9 +1,12 @@
 package za.ac.cput.prm_marketplace.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
+import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
@@ -22,12 +25,15 @@ import za.ac.cput.prm_marketplace.repository.UserRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class OrderServiceImpl implements IOrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
 
     private static final Set<OrderStatus> CANCELLABLE = EnumSet.of(
             OrderStatus.PENDING, OrderStatus.CONFIRMED);
@@ -42,6 +48,7 @@ public class OrderServiceImpl implements IOrderService {
     private final AddressRepository addressRepository;
     private final OrderItemRepository orderItemRepository;
     private final IPaymentService paymentService;
+    private final INotificationService notificationService;
 
     public OrderServiceImpl(OrderRepository orderRepository,
                             UserRepository userRepository,
@@ -49,7 +56,8 @@ public class OrderServiceImpl implements IOrderService {
                             CartItemRepository cartItemRepository,
                             AddressRepository addressRepository,
                             OrderItemRepository orderItemRepository,
-                            IPaymentService paymentService) {
+                            IPaymentService paymentService,
+                            INotificationService notificationService) {
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
@@ -57,6 +65,7 @@ public class OrderServiceImpl implements IOrderService {
         this.addressRepository = addressRepository;
         this.orderItemRepository = orderItemRepository;
         this.paymentService = paymentService;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -241,7 +250,71 @@ public class OrderServiceImpl implements IOrderService {
 
         // Emptying the cart is scoped to the lines that actually made it into the order.
         cartItemRepository.deleteAll(purchased);
+        notifySellersOf(saved);
         return saved;
+    }
+
+    /**
+     * Tells each seller whose listing was bought that an order exists.
+     *
+     * <p>Without this a seller has no way to learn that somebody bought from them: the order list is
+     * the buyer's, the messages endpoint needs the seller to already know to write first, and nothing
+     * else in the product surfaces it. A notification per seller rather than per line, because an
+     * order of three of a seller's items is one thing that happened to them.
+     *
+     * <p>Deliberately skipped when the seller is the buyer. Buying your own listing is possible and is
+     * not an error, but a notification telling you about your own order is noise on every refresh.
+     */
+    private void notifySellersOf(Order order) {
+        UUID buyerId = order.getBuyer() == null ? null : order.getBuyer().getId();
+        Set<UUID> sellers = new LinkedHashSet<>();
+        for (OrderItem item : order.getItems()) {
+            if (item == null || item.getProduct() == null || item.getProduct().getVendor() == null
+                    || item.getProduct().getVendor().getUser() == null) {
+                continue;
+            }
+            UUID sellerId = item.getProduct().getVendor().getUser().getId();
+            if (sellerId != null && !sellerId.equals(buyerId)) {
+                sellers.add(sellerId);
+            }
+        }
+
+        String amount = "R" + (order.getTotalAmount() == null ? "0.00" : order.getTotalAmount().toPlainString());
+        for (UUID sellerId : sellers) {
+            notify(sellerId, "New order received",
+                    "One of your listings was bought. Order " + order.getId() + " for " + amount
+                            + " is waiting for you to confirm.");
+        }
+    }
+
+    /**
+     * Tells the buyer their order moved. Faculty and the seller's vendor account are the only roles
+     * that can move it, so the buyer is otherwise the last to know, watching a status change happen
+     * to them.
+     */
+    private void notifyBuyerOfStatusChange(Order order) {
+        User buyer = order.getBuyer();
+        if (buyer == null || buyer.getId() == null) {
+            return;
+        }
+        String amount = "R" + (order.getTotalAmount() == null ? "0.00" : order.getTotalAmount().toPlainString());
+        String title = order.getStatus() == OrderStatus.CANCELLED
+                ? "Order cancelled"
+                : "Order " + order.getStatus().name().toLowerCase();
+        notify(buyer.getId(), title, "Your order " + order.getId() + " for " + amount
+                + " is now " + order.getStatus().name().toLowerCase() + ".");
+    }
+
+    /**
+     * A notification that fails must never undo an order that was already written, so this cannot
+     * propagate. The same bargain {@code PaymentServiceImpl} makes about payment notifications.
+     */
+    private void notify(UUID userId, String title, String message) {
+        try {
+            notificationService.send(userId, NotificationType.ORDER, title, message);
+        } catch (RuntimeException e) {
+            log.warn("Could not send order notification to {} titled \"{}\"", userId, title, e);
+        }
     }
 
     @Override
@@ -261,7 +334,9 @@ public class OrderServiceImpl implements IOrderService {
             return null;
         }
         existing.setStatus(status);
-        return orderRepository.save(existing);
+        Order saved = orderRepository.save(existing);
+        notifyBuyerOfStatusChange(saved);
+        return saved;
     }
 
     /**

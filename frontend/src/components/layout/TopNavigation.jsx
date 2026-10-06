@@ -1,5 +1,6 @@
 import { Home, Search, Compass, ShoppingCart, MessageSquare, User, LayoutGrid } from 'lucide-react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
+import NotificationBell from './NotificationBell';
 
 const desktopItems = [
   { icon: Home, label: 'Home', path: '/', activeWhen: ['/'] },
@@ -23,25 +24,29 @@ const TopNavigation = () => {
           <span className="font-bold text-lg tracking-tight text-text-primary">PRM Marketplace</span>
         </Link>
 
-        <nav className="flex items-center gap-1" aria-label="Primary">
-          {desktopItems.map((item) => {
-            const isActive = item.activeWhen.includes(pathname);
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  isActive
-                    ? 'bg-primary-muted text-primary'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-lavender/60'
-                }`}
-              >
-                <item.icon size={17} strokeWidth={isActive ? 2.4 : 2} />
-                {item.label}
-              </NavLink>
-            );
-          })}
-        </nav>
+        <div className="flex items-center gap-1">
+          <nav className="flex items-center gap-1" aria-label="Primary">
+            {desktopItems.map((item) => {
+              const isActive = item.activeWhen.includes(pathname);
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-primary-muted text-primary'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-lavender/60'
+                  }`}
+                >
+                  <item.icon size={17} strokeWidth={isActive ? 2.4 : 2} />
+                  {item.label}
+                </NavLink>
+              );
+            })}
+          </nav>
+
+          <NotificationBell />
+        </div>
       </div>
     </header>
   );

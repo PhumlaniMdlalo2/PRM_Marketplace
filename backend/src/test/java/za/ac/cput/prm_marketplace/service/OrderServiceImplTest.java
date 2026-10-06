@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
+import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
 import za.ac.cput.prm_marketplace.domain.Payment;
@@ -17,6 +18,7 @@ import za.ac.cput.prm_marketplace.domain.PaymentStatus;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
 import za.ac.cput.prm_marketplace.repository.AddressRepository;
 import za.ac.cput.prm_marketplace.repository.CartItemRepository;
 import za.ac.cput.prm_marketplace.repository.OrderRepository;
@@ -25,6 +27,7 @@ import za.ac.cput.prm_marketplace.repository.OrderItemRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,7 +35,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +65,9 @@ class OrderServiceImplTest {
     @Mock
     private IPaymentService paymentService;
 
+    @Mock
+    private INotificationService notificationService;
+
     @InjectMocks
     private OrderServiceImpl orderService;
 
@@ -68,6 +77,30 @@ class OrderServiceImplTest {
                 .setName("Buyer")
                 .setEmail("buyer@example.com")
                 .setPasswordHash("hash")
+                .build();
+    }
+
+    private User buildUser(String name, Role role) {
+        return new User.Builder()
+                .setId(UUID.randomUUID())
+                .setName(name)
+                .setEmail(name + "-" + UUID.randomUUID() + "@example.com")
+                .setPasswordHash("hash")
+                .setRole(role)
+                .build();
+    }
+
+    /** A listing with a seller on it, which is what checkout needs to know whom to tell. */
+    private Product buildSoldProduct(BigDecimal price, User seller) {
+        return new Product.Builder()
+                .id(UUID.randomUUID())
+                .name("Textbook")
+                .price(price)
+                .vendor(new VendorProfile.Builder()
+                        .setId(UUID.randomUUID())
+                        .setUser(seller)
+                        .setBusinessName(seller.getName() + " Books")
+                        .build())
                 .build();
     }
 
@@ -386,6 +419,197 @@ class OrderServiceImplTest {
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(order.getItems()).hasSize(1);
         assertThat(order.getTotalAmount()).isEqualByComparingTo("200.00");
+    }
+
+    // ---------- notifications ----------
+
+    @Test
+    @DisplayName("checkout tells the seller that one of their listings was bought")
+    void checkout_notifiesTheSeller() {
+        User buyer = buildBuyer();
+        User seller = buildUser("Seller", Role.VENDOR);
+        Product product = buildSoldProduct(new BigDecimal("100.00"), seller);
+        givenACartWith(buyer, product);
+        givenAPaymentIsAccepted();
+
+        orderService.checkout(buyer.getId(), null, null);
+
+        verify(notificationService).send(eq(seller.getId()), eq(NotificationType.ORDER),
+                eq("New order received"), argThat(message -> message.contains("100.00")));
+        verify(notificationService, never()).send(eq(buyer.getId()), eq(NotificationType.ORDER),
+                anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("each seller is told once, however many of their lines the order holds")
+    void checkout_notifiesEachSellerOnceForTheirOwnLines() {
+        User buyer = buildBuyer();
+        User first = buildUser("First", Role.VENDOR);
+        User second = buildUser("Second", Role.VENDOR);
+        Product textbook = buildSoldProduct(new BigDecimal("100.00"), first);
+        Product laptop = buildSoldProduct(new BigDecimal("50.00"), second);
+        Product spareTextbook = buildSoldProduct(new BigDecimal("100.00"), first);
+        givenACartWith(buyer, textbook, spareTextbook, laptop);
+        givenAPaymentIsAccepted();
+
+        Order order = orderService.checkout(buyer.getId(), null, null);
+
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("250.00");
+        assertThat(titlesSentTo(first.getId())).hasSize(1);
+        assertThat(titlesSentTo(second.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("buying your own listing does not notify you about your own order")
+    void checkout_doesNotNotifyTheBuyerAsTheirOwnSeller() {
+        User buyer = buildBuyer();
+        givenACartWith(buyer, buildSoldProduct(new BigDecimal("100.00"), buyer));
+        givenAPaymentIsAccepted();
+
+        Order order = orderService.checkout(buyer.getId(), null, null);
+
+        assertThat(order).isNotNull();
+        verify(notificationService, never()).send(any(), any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a notification that fails does not lose the order")
+    void checkout_survivesANotificationFailure() {
+        User buyer = buildBuyer();
+        Product product = buildSoldProduct(new BigDecimal("100.00"), buildUser("Seller", Role.VENDOR));
+        givenACartWith(buyer, product);
+        givenAPaymentIsAccepted();
+        when(notificationService.send(any(), any(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("notification table unavailable"));
+
+        Order order = orderService.checkout(buyer.getId(), null, null);
+
+        assertThat(order).isNotNull();
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("100.00");
+        verify(cartItemRepository).deleteAll(any());
+    }
+
+    @Test
+    @DisplayName("no order is written, so nobody is notified, when checkout is refused")
+    void checkout_notifiesNobodyWhenItRefuses() {
+        User buyer = buildBuyer();
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of());
+
+        assertThat(orderService.checkout(buyer.getId(), null, null)).isNull();
+
+        verify(notificationService, never()).send(any(), any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("the buyer is told when faculty advances their order")
+    void updateStatus_notifiesTheBuyer() {
+        User buyer = buildBuyer();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buyer)
+                .setStatus(OrderStatus.PENDING)
+                .setTotalAmount(new BigDecimal("100.00"))
+                .build();
+        givenFacultyMayUpdate(order);
+
+        orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED, buyer.getId(), Role.FACULTY);
+
+        verify(notificationService).send(eq(buyer.getId()), eq(NotificationType.ORDER),
+                eq("Order confirmed"), argThat(message -> message.contains("100.00")));
+    }
+
+    @Test
+    @DisplayName("a cancellation reads as a cancellation rather than a status name")
+    void updateStatus_titlesACancellationPlainly() {
+        User buyer = buildBuyer();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buyer)
+                .setStatus(OrderStatus.CONFIRMED)
+                .build();
+        givenFacultyMayUpdate(order);
+
+        orderService.updateStatus(order.getId(), OrderStatus.CANCELLED, buyer.getId(), Role.FACULTY);
+
+        verify(notificationService).send(eq(buyer.getId()), eq(NotificationType.ORDER),
+                eq("Order cancelled"), argThat(message -> message.contains("cancelled")));
+    }
+
+    @Test
+    @DisplayName("a refused status change notifies nobody")
+    void updateStatus_notifiesNobodyWhenRefused() {
+        UUID intruderId = UUID.randomUUID();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buildBuyer())
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        // The order holds none of this vendor's products, so the change is refused after the lookup.
+        when(orderItemRepository.existsByOrderIdAndVendorUserId(order.getId(), intruderId))
+                .thenReturn(false);
+
+        assertThat(orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED,
+                intruderId, Role.VENDOR)).isNull();
+
+        verify(notificationService, never()).send(any(), any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a notification that fails does not undo the status change")
+    void updateStatus_survivesANotificationFailure() {
+        User buyer = buildBuyer();
+        Order order = new Order.Builder()
+                .setId(UUID.randomUUID())
+                .setBuyer(buyer)
+                .setStatus(OrderStatus.PENDING)
+                .build();
+        givenFacultyMayUpdate(order);
+        when(notificationService.send(any(), any(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("notification table unavailable"));
+
+        Order updated = orderService.updateStatus(order.getId(), OrderStatus.CONFIRMED,
+                buyer.getId(), Role.FACULTY);
+
+        assertThat(updated).isNotNull();
+        assertThat(updated.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(orderRepository).save(order);
+    }
+
+    /** Faculty may act on any order, so the ownership check is the only gate left to arrange. */
+    private void givenFacultyMayUpdate(Order order) {
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    private void givenACartWith(User buyer, Product... products) {
+        CartItem[] lines = new CartItem[products.length];
+        for (int i = 0; i < products.length; i++) {
+            lines[i] = buildCartItem(products[i], 1);
+            when(productRepository.decrementStock(products[i].getId(), 1)).thenReturn(1);
+            when(productRepository.findById(products[i].getId())).thenReturn(Optional.of(products[i]));
+        }
+        when(userRepository.findById(buyer.getId())).thenReturn(Optional.of(buyer));
+        when(cartItemRepository.findByUser_Id(buyer.getId())).thenReturn(List.of(lines));
+        when(orderRepository.save(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    /** The notification titles one particular recipient was sent, read back off the recorded calls. */
+    private List<String> titlesSentTo(UUID userId) {
+        ArgumentCaptor<UUID> recipients = ArgumentCaptor.forClass(UUID.class);
+        ArgumentCaptor<String> titles = ArgumentCaptor.forClass(String.class);
+        verify(notificationService, atLeastOnce())
+                .send(recipients.capture(), any(NotificationType.class), titles.capture(), anyString());
+
+        List<String> sent = new ArrayList<>();
+        for (int i = 0; i < recipients.getAllValues().size(); i++) {
+            if (userId.equals(recipients.getAllValues().get(i))) {
+                sent.add(titles.getAllValues().get(i));
+            }
+        }
+        return sent;
     }
 
     @Test
