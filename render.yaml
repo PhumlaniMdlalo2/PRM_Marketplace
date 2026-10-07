@@ -1,4 +1,4 @@
-﻿services:
+services:
   - type: web
     name: prm-marketplace-backend
     env: java
@@ -43,7 +43,7 @@
       - key: IMAGE_MAX_BYTES
         value: 5242880
 
-  - type: static
+  - type: static_site
     name: prm-marketplace-frontend
     rootDir: frontend
     buildCommand: npm ci && npm run build
