@@ -43,7 +43,7 @@ services:
       - key: IMAGE_MAX_BYTES
         value: 5242880
 
-  - type: static_site
+  - type: static
     name: prm-marketplace-frontend
     rootDir: frontend
     buildCommand: npm ci && npm run build
