@@ -12,26 +12,36 @@ schema, and authentication is a stateless JWT.
 
 ## Running it
 
+One-time setup: copy the template at the repository root and fill in your values. `.env` is
+gitignored, so credentials never reach the repository; the backend loads it automatically.
+
 ```bash
-# The application refuses to start without a signing key, so this is not optional.
-export JWT_SECRET="$(openssl rand -base64 48)"
+# from the repository root
+cp .env.example .env
+cd backend
 ./mvnw spring-boot:run
 ```
 
-On Windows PowerShell:
+On Windows PowerShell, from the repository root:
 
 ```powershell
-$env:JWT_SECRET = [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))
+Copy-Item .env.example .env
+cd backend
 .\mvnw.cmd spring-boot:run
 ```
+
+Local runs fall back to a development JWT signing key; set `JWT_SECRET` in `.env` for anything
+shared or deployed.
 
 The API is then on `http://localhost:8080` and Swagger UI on
 `http://localhost:8080/swagger-ui.html`.
 
 ## Configuration
 
-Everything below is read from the environment. The defaults are chosen so that a fresh clone starts
-on a laptop with a local MySQL; none of them are safe for a real deployment.
+Everything below is read from the environment, or from `.env` at the repository root (copy
+`.env.example`); a real environment variable takes precedence over the file. The defaults are
+chosen so that a fresh clone starts on a laptop with a local MySQL; none of them are safe for a
+real deployment.
 
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |

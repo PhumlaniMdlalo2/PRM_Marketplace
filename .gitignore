@@ -6,9 +6,9 @@
 # someone putting one in a file while getting a deployment working and then committing it. .env was
 # previously committable, and a leaked database password or JWT signing key is not something that
 # can be undone by rotating it quietly.
-.env
 .env.*
 *.env
+!.env
 !.env.example
 
 # IntelliJ. The backend/.gitignore covers backend/.idea only, which is why the root .idea was tracked:
