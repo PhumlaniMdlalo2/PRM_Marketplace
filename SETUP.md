@@ -59,6 +59,18 @@ cd PRM_Marketplace\backend
 - Success looks like: **`Started PrmMarketplaceApplication`**
 - Leave this window open. If it ever closes, the app is off.
 
+### Window 1 alternative — the backend in IntelliJ
+
+Prefer a click over a command? Use IntelliJ IDEA for Window 1 instead:
+
+1. **File → Open** → select the `PRM_Marketplace` folder → **OK**
+2. Wait for the import to finish (progress bar at the bottom) — the first time it downloads dependencies
+3. If it asks for a **JDK/SDK**, pick the Java you installed in Part 1, Step 2
+4. Open `backend/src/main/java/za/ac/cput/prm_marketplace/PrmMarketplaceApplication.java` and click the **green play ▶** button
+5. Success is the same: **`Started PrmMarketplaceApplication`**. Stop it with the **red ■** button
+
+The project's settings are picked up automatically — nothing extra to configure in IntelliJ.
+
 ### Window 2 — the frontend
 
 Open a **second** PowerShell window, then:
@@ -72,6 +84,8 @@ npm run dev
 - `npm install` only does anything the first time (a few minutes)
 - Success looks like: **`Local: http://localhost:5173/`**
 
+No separate terminal needed if you use IntelliJ: the **Terminal** tab at the bottom of the window works for these commands too.
+
 ### Open the app
 
 In your browser, go to **http://localhost:5173**
@@ -80,7 +94,7 @@ In your browser, go to **http://localhost:5173**
 
 ### Stop the app
 
-Go to each terminal window and press **Ctrl + C**. To start again later, just repeat the two window commands (skip `npm install` — it never needs repeating).
+Go to each terminal window and press **Ctrl + C** (or click the red **■** in IntelliJ). To start again later, just repeat the two window commands (skip `npm install` — it never needs repeating).
 
 ## When something goes wrong
 
