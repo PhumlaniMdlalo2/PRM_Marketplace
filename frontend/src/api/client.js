@@ -1,4 +1,4 @@
-import axios from 'axios'
+﻿import axios from 'axios'
 
 /**
  * One axios instance for the whole app.
@@ -14,7 +14,7 @@ import axios from 'axios'
  * relative path still resolves correctly.
  */
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_BACKEND_URL || '/api',
   // Anything slower than this is worth telling the user about rather than leaving a spinner up
   // forever. Without it a hung request is indistinguishable from a slow one.
   timeout: 15000,
@@ -169,7 +169,7 @@ const AUTH_CALLS = ['/auth/login', '/auth/refresh'];
  * answer.
  *
  * A 401 or 403 is the end of the session and clears it. A network failure or a 500 is not a
- * verdict on the session, so it is left alone — signing a user out because a request timed out
+ * verdict on the session, so it is left alone ÔÇö signing a user out because a request timed out
  * would turn a recoverable hiccup into a lost one.
  */
 const performRefresh = async () => {
