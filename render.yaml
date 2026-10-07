@@ -43,5 +43,3 @@ services:
       - key: IMAGE_MAX_BYTES
         value: 5242880
 
-    envVars:
-        sync: false
