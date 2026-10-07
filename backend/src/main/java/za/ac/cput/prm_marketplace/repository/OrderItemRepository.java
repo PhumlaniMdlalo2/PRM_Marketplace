@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
+import za.ac.cput.prm_marketplace.domain.Order;
 
 import java.util.List;
 import java.util.Optional;
@@ -51,6 +52,14 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             """)
     boolean existsByOrderIdAndVendorUserId(@Param("orderId") UUID orderId,
                                            @Param("vendorUserId") UUID vendorUserId);
+
+    @Query("""
+            select distinct oi.order
+            from OrderItem oi
+            where oi.product.vendor.user.id = :vendorUserId
+            order by oi.order.createdAt desc
+            """)
+    List<Order> findOrdersByVendorUserId(@Param("vendorUserId") UUID vendorUserId);
 
     /**
      * True when this buyer has actually bought this product.

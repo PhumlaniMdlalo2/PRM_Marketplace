@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import za.ac.cput.prm_marketplace.dto.AuthorSummary;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +37,12 @@ public class Order {
     @JoinColumn(name = "shipping_address_id")
     private Address shippingAddress;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private FulfillmentMethod fulfillmentMethod;
+
+    private LocalDate estimatedDeliveryDate;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -54,6 +61,8 @@ public class Order {
         this.status = builder.status;
         this.totalAmount = builder.totalAmount;
         this.shippingAddress = builder.shippingAddress;
+        this.fulfillmentMethod = builder.fulfillmentMethod;
+        this.estimatedDeliveryDate = builder.estimatedDeliveryDate;
         this.createdAt = builder.createdAt;
         this.updatedAt = builder.updatedAt;
     }
@@ -91,6 +100,16 @@ public class Order {
 
     public Address getShippingAddress() {
         return shippingAddress;
+    }
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public FulfillmentMethod getFulfillmentMethod() {
+        return fulfillmentMethod;
+    }
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public LocalDate getEstimatedDeliveryDate() {
+        return estimatedDeliveryDate;
     }
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
@@ -140,6 +159,14 @@ public class Order {
         this.shippingAddress = shippingAddress;
     }
 
+    public void setFulfillmentMethod(FulfillmentMethod fulfillmentMethod) {
+        this.fulfillmentMethod = fulfillmentMethod;
+    }
+
+    public void setEstimatedDeliveryDate(LocalDate estimatedDeliveryDate) {
+        this.estimatedDeliveryDate = estimatedDeliveryDate;
+    }
+
     /**
      * Server-owned like the rest: set once, from the order's own line items, and never taken from
      * a request body.
@@ -185,6 +212,8 @@ public class Order {
         private OrderStatus status = OrderStatus.PENDING;
         private BigDecimal totalAmount;
         private Address shippingAddress;
+        private FulfillmentMethod fulfillmentMethod = FulfillmentMethod.MEETUP;
+        private LocalDate estimatedDeliveryDate;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
 
@@ -213,6 +242,16 @@ public class Order {
             return this;
         }
 
+        public Builder setFulfillmentMethod(FulfillmentMethod fulfillmentMethod) {
+            this.fulfillmentMethod = fulfillmentMethod;
+            return this;
+        }
+
+        public Builder setEstimatedDeliveryDate(LocalDate estimatedDeliveryDate) {
+            this.estimatedDeliveryDate = estimatedDeliveryDate;
+            return this;
+        }
+
         public Builder setCreatedAt(LocalDateTime createdAt) {
             this.createdAt = createdAt;
             return this;
@@ -229,6 +268,8 @@ public class Order {
             this.status = order.status;
             this.totalAmount = order.totalAmount;
             this.shippingAddress = order.shippingAddress;
+            this.fulfillmentMethod = order.fulfillmentMethod;
+            this.estimatedDeliveryDate = order.estimatedDeliveryDate;
             this.createdAt = order.createdAt;
             this.updatedAt = order.updatedAt;
             return this;

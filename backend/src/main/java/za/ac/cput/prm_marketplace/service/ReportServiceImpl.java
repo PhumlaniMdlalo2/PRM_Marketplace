@@ -17,11 +17,11 @@ import java.util.UUID;
 public class ReportServiceImpl implements IReportService {
 
     /**
-     * Resolving a report is a moderation action, so it is limited to faculty. Students, vendors and
+     * Resolving a report is a moderation action, so it is limited to admin. Students, vendors and
      * residents must not be able to dismiss a complaint or mark it resolved.
      */
     private static boolean mayResolve(Role role) {
-        return role == Role.FACULTY;
+        return role == Role.ADMIN;
     }
 
     private final ReportRepository reportRepository;

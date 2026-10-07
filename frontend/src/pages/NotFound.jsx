@@ -8,7 +8,7 @@ const NotFound = () => {
   return (
     <div className="min-h-dvh bg-white flex flex-col items-center justify-center px-6 text-center">
       <div className="w-24 h-24 rounded-[2rem] bg-lavender flex items-center justify-center mb-6">
-        <span className="text-4xl font-bold text-primary">PRM</span>
+        <span className="text-4xl font-bold tracking-[-0.08em] text-primary">vendra.</span>
       </div>
       <p className="text-sm font-semibold text-primary uppercase tracking-wider">404</p>
       <h1 className="text-3xl font-bold text-text-primary mt-2 text-wrap-balance">

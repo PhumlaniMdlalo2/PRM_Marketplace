@@ -3,6 +3,7 @@ package za.ac.cput.prm_marketplace.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -10,13 +11,21 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.domain.Order;
+import za.ac.cput.prm_marketplace.domain.OrderItem;
+import za.ac.cput.prm_marketplace.domain.OrderStatus;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentSimulationOutcome;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.domain.Product;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.exception.ConflictException;
 import za.ac.cput.prm_marketplace.repository.OrderRepository;
+import za.ac.cput.prm_marketplace.repository.OrderItemRepository;
 import za.ac.cput.prm_marketplace.repository.PaymentRepository;
+import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -25,6 +34,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -46,6 +56,12 @@ class PaymentServiceImplTest {
     private OrderRepository orderRepository;
 
     @Mock
+    private OrderItemRepository orderItemRepository;
+
+    @Mock
+    private VendorProfileRepository vendorProfileRepository;
+
+    @Mock
     private INotificationService notificationService;
 
     @InjectMocks
@@ -62,6 +78,71 @@ class PaymentServiceImplTest {
         orderId = UUID.randomUUID();
         payerId = UUID.randomUUID();
         intruderId = UUID.randomUUID();
+    }
+
+    @Test
+    @DisplayName("sandbox success is recorded only when simulation is enabled for the payment owner")
+    void simulate_successCompletesOwnedSandboxPayment() {
+        PaymentServiceImpl simulator = new PaymentServiceImpl(
+                paymentRepository, orderRepository, orderItemRepository, vendorProfileRepository, notificationService);
+        ReflectionTestUtils.setField(simulator, "simulationEnabled", true);
+        Payment sandbox = new Payment.Builder()
+                .copy(buildPayment(PaymentStatus.PENDING))
+                .setMethod(PaymentMethod.SANDBOX)
+                .build();
+        when(paymentRepository.findByIdAndUserId(id, payerId)).thenReturn(Optional.of(sandbox));
+        when(paymentRepository.save(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment result = simulator.simulate(id, PaymentSimulationOutcome.SUCCESS, payerId);
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+        assertThat(result.getPaidAt()).isNotNull();
+        verify(notificationService).send(eq(payerId), eq(NotificationType.PAYMENT),
+                eq("Payment successful"), anyString());
+    }
+
+    @Test
+    @DisplayName("sandbox failure stays a failed payment and does not set paidAt")
+    void simulate_failureMarksPaymentFailed() {
+        PaymentServiceImpl simulator = new PaymentServiceImpl(
+                paymentRepository, orderRepository, orderItemRepository, vendorProfileRepository, notificationService);
+        ReflectionTestUtils.setField(simulator, "simulationEnabled", true);
+        Payment sandbox = new Payment.Builder()
+                .copy(buildPayment(PaymentStatus.PENDING))
+                .setMethod(PaymentMethod.SANDBOX)
+                .build();
+        when(paymentRepository.findByIdAndUserId(id, payerId)).thenReturn(Optional.of(sandbox));
+        when(paymentRepository.save(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment result = simulator.simulate(id, PaymentSimulationOutcome.FAILURE, payerId);
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(result.getPaidAt()).isNull();
+        verify(notificationService).send(eq(payerId), eq(NotificationType.PAYMENT),
+                eq("Payment failed"), anyString());
+    }
+
+    @Test
+    @DisplayName("sandbox results are refused when disabled, for another account, or for a non-sandbox payment")
+    void simulate_refusesDisabledForeignAndRealPayments() {
+        Payment sandbox = new Payment.Builder()
+                .copy(buildPayment(PaymentStatus.PENDING))
+                .setMethod(PaymentMethod.SANDBOX)
+                .build();
+        PaymentServiceImpl disabled = new PaymentServiceImpl(
+                paymentRepository, orderRepository, orderItemRepository, vendorProfileRepository, notificationService);
+        PaymentServiceImpl enabled = new PaymentServiceImpl(
+                paymentRepository, orderRepository, orderItemRepository, vendorProfileRepository, notificationService);
+        ReflectionTestUtils.setField(enabled, "simulationEnabled", true);
+
+        assertThat(disabled.simulate(id, PaymentSimulationOutcome.SUCCESS, payerId)).isNull();
+        when(paymentRepository.findByIdAndUserId(id, intruderId)).thenReturn(Optional.empty());
+        assertThat(enabled.simulate(id, PaymentSimulationOutcome.SUCCESS, intruderId)).isNull();
+
+        Payment realMethod = new Payment.Builder().copy(sandbox).setMethod(PaymentMethod.CARD).build();
+        when(paymentRepository.findByIdAndUserId(id, payerId)).thenReturn(Optional.of(realMethod));
+        assertThat(enabled.simulate(id, PaymentSimulationOutcome.SUCCESS, payerId)).isNull();
+        verify(paymentRepository, never()).save(any(Payment.class));
     }
 
     private Order orderOwnedBy(UUID buyerId, String total) {
@@ -83,6 +164,68 @@ class PaymentServiceImplTest {
                 .setTransactionReference("PAY-TEST00000001")
                 .setCreatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    @Test
+    @DisplayName("manual payment belongs to one verified seller and uses the seller's exact order total")
+    void createForSeller_assignsSellerAndServerCalculatedAmount() {
+        User seller = new User.Builder().setId(intruderId).setName("Seller").build();
+        VendorProfile profile = new VendorProfile.Builder()
+                .setUser(seller)
+                .setBusinessName("Seller Shop")
+                .setVerified(true)
+                .setPayoutDetails("Seller Name", "Bank", "12345678", "123456", "CURRENT")
+                .build();
+        Product product = new Product.Builder().id(UUID.randomUUID())
+                .name("Book").price(new BigDecimal("25.00")).vendor(profile).build();
+        OrderItem item = new OrderItem.Builder().setProduct(product)
+                .setQuantity(2).setPriceAtPurchase(new BigDecimal("25.00")).build();
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "50.00")));
+        when(vendorProfileRepository.findByUserId(intruderId)).thenReturn(Optional.of(profile));
+        when(orderItemRepository.findByOrderId(orderId)).thenReturn(List.of(item));
+        when(paymentRepository.save(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment result = paymentService.createForSeller(orderId, PaymentMethod.EFT, payerId, intruderId);
+
+        assertThat(result.getAmount()).isEqualByComparingTo("50.00");
+        assertThat(result.getSellerUserId()).isEqualTo(intruderId);
+        assertThat(result.getUserId()).isEqualTo(payerId);
+    }
+
+    @Test
+    @DisplayName("EFT checkout refuses a seller without payout details")
+    void createForSeller_reportsMissingPayoutDetails() {
+        VendorProfile profile = new VendorProfile.Builder()
+                .setUser(new User.Builder().setId(intruderId).build())
+                .setVerified(true)
+                .build();
+        when(orderRepository.findByIdAndBuyerId(orderId, payerId))
+                .thenReturn(Optional.of(orderOwnedBy(payerId, "50.00")));
+        when(vendorProfileRepository.findByUserId(intruderId)).thenReturn(Optional.of(profile));
+
+        assertThatThrownBy(() -> paymentService.createForSeller(
+                orderId, PaymentMethod.EFT, payerId, intruderId))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Choose cash on pickup");
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("only the assigned seller can confirm an EFT receipt")
+    void confirmReceipt_completesAssignedSellerPayment() {
+        Payment pending = new Payment.Builder().copy(buildPayment(PaymentStatus.PENDING))
+                .setMethod(PaymentMethod.EFT).setSellerUserId(intruderId).build();
+        when(paymentRepository.findById(id)).thenReturn(Optional.of(pending));
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(
+                new Order.Builder().setId(orderId).setStatus(OrderStatus.PENDING).build()));
+        when(paymentRepository.save(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Payment result = paymentService.confirmReceipt(id, intruderId, Role.VENDOR);
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+        assertThat(result.getPaidAt()).isNotNull();
+        assertThat(paymentService.confirmReceipt(id, payerId, Role.VENDOR)).isNull();
     }
 
     // create
@@ -491,7 +634,7 @@ class PaymentServiceImplTest {
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.FACULTY);
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.ADMIN);
 
         assertThat(updated.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         assertThat(updated.getPaidAt()).isNotNull();
@@ -501,7 +644,7 @@ class PaymentServiceImplTest {
 
     @Test
     @DisplayName("the payer cannot mark their own payment as paid")
-    void updateStatus_completionRequiresFaculty() {
+    void updateStatus_completionRequiresAdmin() {
         // No stubbing: the authority check runs before the payment is loaded, so the repository is
         // never consulted. That ordering is the point -- an unauthorised caller learns nothing about
         // whether the id exists.
@@ -514,7 +657,7 @@ class PaymentServiceImplTest {
 
     @Test
     @DisplayName("the payer cannot mark their own payment as failed either")
-    void updateStatus_failureRequiresFaculty() {
+    void updateStatus_failureRequiresAdmin() {
         // Otherwise a buyer could erase a completed charge they regret.
         assertThat(paymentService.updateStatus(id, PaymentStatus.FAILED, payerId, Role.VENDOR))
                 .isNull();
@@ -523,8 +666,8 @@ class PaymentServiceImplTest {
     }
 
     @Test
-    @DisplayName("no role other than faculty can settle a payment")
-    void updateStatus_everyNonFacultyRoleIsRefused() {
+    @DisplayName("no role other than admin can settle a payment")
+    void updateStatus_everyNonAdminRoleIsRefused() {
         for (Role role : List.of(Role.STUDENT, Role.VENDOR, Role.RESIDENT)) {
             assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, role))
                     .as("role %s must not settle a payment", role)
@@ -551,7 +694,7 @@ class PaymentServiceImplTest {
 
     @Test
     @DisplayName("the payer cannot refund their own payment")
-    void updateStatus_refundRequiresFaculty() {
+    void updateStatus_refundRequiresAdmin() {
         assertThat(paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.STUDENT)).isNull();
 
         verifyNoInteractions(paymentRepository);
@@ -559,26 +702,26 @@ class PaymentServiceImplTest {
     }
 
     @Test
-    @DisplayName("faculty may refund")
-    void updateStatus_facultyMayRefund() {
+    @DisplayName("admin may refund")
+    void updateStatus_adminMayRefund() {
         when(paymentRepository.findByIdAndUserId(id, payerId))
                 .thenReturn(Optional.of(buildPayment(PaymentStatus.COMPLETED)));
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Payment updated = paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.FACULTY);
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.ADMIN);
 
         assertThat(updated.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
     }
 
     @Test
-    @DisplayName("even faculty cannot move somebody else's payment")
+    @DisplayName("even admin cannot move somebody else's payment")
     void updateStatus_rejectsSomebodyElsesPayment() {
         when(paymentRepository.findByIdAndUserId(id, intruderId)).thenReturn(Optional.empty());
 
-        // Faculty has authority over settling, not over whose payment it is. Ownership is still
+        // Admin has authority over settling, not over whose payment it is. Ownership is still
         // scoped to the caller, so this stays refused at full privilege.
-        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, intruderId, Role.FACULTY))
+        assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, intruderId, Role.ADMIN))
                 .isNull();
 
         verify(paymentRepository, never()).save(any());
@@ -591,7 +734,7 @@ class PaymentServiceImplTest {
                 .thenReturn(Optional.of(buildPayment(PaymentStatus.PENDING)));
 
         // PENDING cannot go straight to REFUNDED.
-        assertThat(paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.FACULTY))
+        assertThat(paymentService.updateStatus(id, PaymentStatus.REFUNDED, payerId, Role.ADMIN))
                 .isNull();
 
         verify(paymentRepository, never()).save(any());
@@ -608,9 +751,9 @@ class PaymentServiceImplTest {
     }
 
     @Test
-    @DisplayName("a null role is not faculty, so settling is refused without a database read")
+    @DisplayName("a null role is not admin, so settling is refused without a database read")
     void updateStatus_nullRoleCannotSettle() {
-        // Worth pinning down because `status != PENDING && role != FACULTY` would otherwise be read
+        // Worth pinning down because `status != PENDING && role != ADMIN` would otherwise be read
         // as permitting a null role through some other path.
         assertThat(paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, null)).isNull();
 
@@ -627,7 +770,7 @@ class PaymentServiceImplTest {
         doThrow(new RuntimeException("sms gateway down"))
                 .when(notificationService).send(any(), any(), anyString(), anyString());
 
-        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.FACULTY);
+        Payment updated = paymentService.updateStatus(id, PaymentStatus.COMPLETED, payerId, Role.ADMIN);
 
         assertThat(updated.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
         verify(paymentRepository).save(any(Payment.class));

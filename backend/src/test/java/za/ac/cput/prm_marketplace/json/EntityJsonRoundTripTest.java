@@ -104,6 +104,19 @@ class EntityJsonRoundTripTest {
     }
 
     @Test
+    void orderIgnoresClientSuppliedFulfillmentAndDeliveryEstimate() throws Exception {
+        Order submitted = objectMapper.readValue("""
+                {
+                  "fulfillmentMethod": "DELIVERY",
+                  "estimatedDeliveryDate": "2026-10-14"
+                }
+                """, Order.class);
+
+        assertThat(submitted.getFulfillmentMethod()).isNull();
+        assertThat(submitted.getEstimatedDeliveryDate()).isNull();
+    }
+
+    @Test
     void backReference_isHiddenFromOutputButAcceptedOnInput() {
         Product product = new Product.Builder()
                 .id(UUID.randomUUID())

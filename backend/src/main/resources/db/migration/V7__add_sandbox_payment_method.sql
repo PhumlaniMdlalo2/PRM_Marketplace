@@ -1,0 +1,2 @@
+ALTER TABLE payments
+    MODIFY COLUMN method ENUM('CARD', 'EFT', 'WALLET', 'SANDBOX') NOT NULL;

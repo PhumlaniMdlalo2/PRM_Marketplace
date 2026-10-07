@@ -3,6 +3,8 @@ package za.ac.cput.prm_marketplace.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -24,6 +26,7 @@ import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
 import za.ac.cput.prm_marketplace.repository.PasswordResetTokenRepository;
 import za.ac.cput.prm_marketplace.repository.RefreshTokenRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
+import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 import za.ac.cput.prm_marketplace.repository.VerificationCodeRepository;
 import za.ac.cput.prm_marketplace.security.JwtService;
 
@@ -35,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -42,6 +46,9 @@ class AuthServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private VendorProfileRepository vendorProfileRepository;
 
     @Mock
     private VerificationCodeRepository verificationCodeRepository;
@@ -67,6 +74,7 @@ class AuthServiceImplTest {
     void setUp() {
         authService = new AuthServiceImpl(
                 userRepository,
+                vendorProfileRepository,
                 verificationCodeRepository,
                 passwordResetTokenRepository,
                 refreshTokenRepository,
@@ -98,11 +106,11 @@ class AuthServiceImplTest {
     @DisplayName("register: persists a verified=false user with an encoded password and returns a token")
     void register_persistsUserAndReturnsToken() {
         stubSharedDependencies();
-        when(userRepository.existsByEmail("jane@example.com")).thenReturn(false);
+        when(userRepository.existsByEmail("jane@mycput.ac.za")).thenReturn(false);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
         AuthResponse response = authService.register(new RegisterRequest(
-                "Jane Doe", "jane@example.com", "password123", null, null));
+                "Jane Doe", "jane@mycput.ac.za", "password123", Role.STUDENT, null));
 
         assertNotNull(response);
         assertEquals("jwt-token", response.token());
@@ -124,7 +132,7 @@ class AuthServiceImplTest {
         when(verificationCodeRepository.save(any(VerificationCode.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        authService.register(new RegisterRequest("Jane", "jane@example.com", "password123", null, null));
+        authService.register(new RegisterRequest("Jane", "jane@mycput.ac.za", "password123", Role.STUDENT, null));
 
         ArgumentCaptor<VerificationCode> captor = ArgumentCaptor.forClass(VerificationCode.class);
         verify(verificationCodeRepository).save(captor.capture());
@@ -134,16 +142,16 @@ class AuthServiceImplTest {
 
         ArgumentCaptor<String> emailCaptor = ArgumentCaptor.forClass(String.class);
         verify(emailService).sendVerificationCode(emailCaptor.capture(), anyString());
-        assertEquals("jane@example.com", emailCaptor.getValue());
+        assertEquals("jane@mycput.ac.za", emailCaptor.getValue());
     }
 
     @Test
     @DisplayName("register: rejects a duplicate email with a conflict")
     void register_duplicateEmail_throwsConflict() {
-        when(userRepository.existsByEmail("jane@example.com")).thenReturn(true);
+        when(userRepository.existsByEmail("jane@mycput.ac.za")).thenReturn(true);
 
         assertThrows(ConflictException.class, () -> authService.register(
-                new RegisterRequest("Jane", "jane@example.com", "password123", null, null)));
+                new RegisterRequest("Jane", "jane@mycput.ac.za", "password123", Role.STUDENT, null)));
 
         verify(userRepository, never()).save(any(User.class));
     }
@@ -152,12 +160,12 @@ class AuthServiceImplTest {
     @DisplayName("register: normalises the email to lower case")
     void register_normalisesEmail() {
         stubSharedDependencies();
-        when(userRepository.existsByEmail("jane@example.com")).thenReturn(false);
+        when(userRepository.existsByEmail("jane@mycput.ac.za")).thenReturn(false);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        authService.register(new RegisterRequest("Jane", "Jane@Example.COM", "password123", null, null));
+        authService.register(new RegisterRequest("Jane", "Jane@MyCPUT.AC.ZA", "password123", Role.STUDENT, null));
 
-        verify(userRepository).existsByEmail("jane@example.com");
+        verify(userRepository).existsByEmail("jane@mycput.ac.za");
     }
 
     @Test
@@ -512,16 +520,14 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("register: refuses to grant faculty, which supervises every order")
-    void register_rejectsFacultySelfService() {
+    @DisplayName("register: refuses to grant admin, which supervises every order")
+    void register_rejectsAdminSelfService() {
         stubSharedDependencies();
-        when(userRepository.existsByEmail("sneaky@example.com")).thenReturn(false);
-
         BadRequestException thrown = assertThrows(BadRequestException.class,
                 () -> authService.register(new RegisterRequest(
-                        "Sneaky", "sneaky@example.com", "password123", Role.FACULTY, null)));
+                        "Sneaky", "sneaky@example.com", "password123", Role.ADMIN, null)));
 
-        assertTrue(thrown.getMessage().contains("FACULTY"));
+        assertTrue(thrown.getMessage().contains("ADMIN"));
         // Fails closed: the account is never written, so there is nothing to escalate into.
         verify(userRepository, never()).save(any(User.class));
     }
@@ -532,13 +538,56 @@ class AuthServiceImplTest {
         stubSharedDependencies();
         when(userRepository.existsByEmail("seller@example.com")).thenReturn(false);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(vendorProfileRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         AuthResponse response = authService.register(new RegisterRequest(
-                "Seller", "seller@example.com", "password123", Role.VENDOR, null));
+                "Seller", "seller@example.com", "password123", Role.VENDOR, null,
+                "Seller Store", "REG-123"));
 
         assertNotNull(response);
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
         assertEquals(Role.VENDOR, captor.getValue().getRole());
+        ArgumentCaptor<za.ac.cput.prm_marketplace.domain.VendorProfile> profileCaptor =
+                ArgumentCaptor.forClass(za.ac.cput.prm_marketplace.domain.VendorProfile.class);
+        verify(vendorProfileRepository).save(profileCaptor.capture());
+        assertEquals("Seller Store", profileCaptor.getValue().getBusinessName());
+        assertEquals("REG-123", profileCaptor.getValue().getRegistrationNo());
+        assertFalse(profileCaptor.getValue().isVerified());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"jane@university.ac.za", "jane@campus.edu.za"})
+    @DisplayName("register: accepts student email addresses from academic domains")
+    void register_studentEmailOutsideCputDomain_isAccepted(String email) {
+        stubSharedDependencies();
+        when(userRepository.existsByEmail(email)).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        AuthResponse response = authService.register(new RegisterRequest(
+                "Jane Doe", email, "password123", Role.STUDENT, null));
+
+        assertNotNull(response);
+        verify(userRepository).existsByEmail(email);
+        verify(userRepository).save(argThat(user -> email.equals(user.getEmail())
+                && user.getRole() == Role.STUDENT));
+    }
+
+    @Test
+    @DisplayName("register: rejects student addresses outside academic domains")
+    void register_studentEmailOutsideAcademicDomains_isRejected() {
+        assertThrows(BadRequestException.class, () -> authService.register(new RegisterRequest(
+                "Jane Doe", "jane@example.com", "password123", Role.STUDENT, null)));
+
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("register: requires seller details for vendor accounts")
+    void register_vendorWithoutBusinessName_isRejected() {
+        assertThrows(BadRequestException.class, () -> authService.register(new RegisterRequest(
+                "Seller", "seller@example.com", "password123", Role.VENDOR, null)));
+
+        verify(userRepository, never()).save(any(User.class));
     }
 }

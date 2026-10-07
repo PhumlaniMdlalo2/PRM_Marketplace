@@ -201,7 +201,7 @@ class BulletinJsonBindingIntegrationTest {
                         .with(asStudent(caller.getId()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest());
+                        .andExpect(status().isNotFound());
     }
 
     @Test

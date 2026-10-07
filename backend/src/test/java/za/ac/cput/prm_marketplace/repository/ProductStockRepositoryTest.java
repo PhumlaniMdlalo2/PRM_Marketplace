@@ -54,6 +54,7 @@ class ProductStockRepositoryTest {
                 .setUser(seller)
                 .setBusinessName("Block B Books")
                 .setRegistrationNo("REG-" + UUID.randomUUID())
+                .setVerified(true)
                 .build());
     }
 
@@ -106,6 +107,34 @@ class ProductStockRepositoryTest {
                 .as("an inactive row still has a stock column, and the predicate has to notice")
                 .isZero();
         assertThat(stockOf(delisted)).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("an unapproved seller's listing cannot be purchased")
+    void decrementStock_refusesUnapprovedSeller() {
+        User pendingSeller = userRepository.save(new User.Builder()
+                .setName("pending seller")
+                .setEmail("pending-" + UUID.randomUUID() + "@example.com")
+                .setPasswordHash("hash")
+                .setRole(Role.VENDOR)
+                .setVerified(true)
+                .build());
+        VendorProfile pendingProfile = vendorProfileRepository.save(new VendorProfile.Builder()
+                .setUser(pendingSeller)
+                .setBusinessName("Pending Books")
+                .setVerified(false)
+                .build());
+        Product pendingListing = productRepository.save(new Product.Builder()
+                .name("Pending book")
+                .price(new BigDecimal("10.00"))
+                .category("Books")
+                .stockQuantity(4)
+                .active(true)
+                .vendor(pendingProfile)
+                .build());
+
+        assertThat(productRepository.decrementStock(pendingListing.getId(), 1)).isZero();
+        assertThat(stockOf(pendingListing)).isEqualTo(4);
     }
 
     @Test

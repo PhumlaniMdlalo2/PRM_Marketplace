@@ -6,6 +6,7 @@ import BackButton from '../components/ui/BackButton';
 import Layout from '../components/layout/Layout';
 import { listCartItems, removeCartItem, setCartItemQuantity } from '../api/cart';
 import { checkoutCart } from '../api/orders';
+import { isPaymentSimulationEnabled } from '../api/payments';
 import { listAddresses } from '../api/addresses';
 import { listAll } from '../api/products';
 import { useAsync } from '../hooks/useAsync';
@@ -44,8 +45,10 @@ const Cart = () => {
   const [busyLine, setBusyLine] = useState(null);
   const [checkoutError, setCheckoutError] = useState(null);
   const [placing, setPlacing] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('CARD');
   const [chosenAddressId, setChosenAddressId] = useState(null);
+  const [paymentMethod, setPaymentMethod] = useState('EFT');
+  const [fulfillmentMethod, setFulfillmentMethod] = useState('DELIVERY');
+  const { data: simulationEnabled } = useAsync(isPaymentSimulationEnabled);
 
   const items = lines ?? [];
   const savedAddresses = addresses ?? [];
@@ -105,7 +108,7 @@ const Cart = () => {
 
   const proceedToCheckout = async () => {
     if (placing || items.length === 0) return;
-    if (!hasAddresses) {
+    if (fulfillmentMethod === 'DELIVERY' && !hasAddresses) {
       setCheckoutError('Add a delivery address before checking out');
       return;
     }
@@ -114,7 +117,11 @@ const Cart = () => {
     try {
       // Both values are the caller's own choices. The server reads the cart and the totals itself,
       // and refuses an address that is not theirs.
-      await checkoutCart(shippingAddressId, paymentMethod);
+      await checkoutCart(
+        fulfillmentMethod === 'DELIVERY' ? shippingAddressId : null,
+        paymentMethod,
+        fulfillmentMethod,
+      );
       navigate('/orders');
     } catch (caught) {
       setCheckoutError(caught.message);
@@ -133,14 +140,6 @@ const Cart = () => {
   const suggestions = (catalogue ?? [])
     .filter((product) => !inCart.has(product.id) && product.active !== false)
     .slice(0, 6);
-
-  // The ids are the backend's enum names verbatim. Jackson binds PaymentMethod case-sensitively, so
-// a lowercase value here would be rejected with a 400 rather than quietly defaulting.
-const paymentOptions = [
-    { id: 'CARD', label: 'Credit / debit card' },
-    { id: 'EFT', label: 'EFT' },
-    { id: 'WALLET', label: 'Digital wallet' },
-  ];
 
   return (
     <Layout showNav={false}>
@@ -252,6 +251,47 @@ const paymentOptions = [
             )}
 
             <div className="mt-8">
+              <h3 className="font-semibold text-text-primary mb-1">How would you like to receive this order?</h3>
+              <p className="mb-3 text-xs text-text-muted">
+                Meetup details are arranged with each seller in marketplace messages.
+              </p>
+              <div className="space-y-2">
+                <label className="flex items-start gap-3 rounded-xl border border-border p-3">
+                  <input
+                    type="radio"
+                    name="fulfillment-method"
+                    value="DELIVERY"
+                    checked={fulfillmentMethod === 'DELIVERY'}
+                    onChange={() => {
+                      setFulfillmentMethod('DELIVERY');
+                      if (paymentMethod === 'CASH_ON_PICKUP') setPaymentMethod('EFT');
+                    }}
+                    className="mt-1 accent-primary"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-text-primary">Deliver to my address</span>
+                    <span className="block text-xs text-text-secondary">An estimated delivery date will appear on your order.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 rounded-xl border border-border p-3">
+                  <input
+                    type="radio"
+                    name="fulfillment-method"
+                    value="MEETUP"
+                    checked={fulfillmentMethod === 'MEETUP'}
+                    onChange={() => setFulfillmentMethod('MEETUP')}
+                    className="mt-1 accent-primary"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-text-primary">Meet the seller</span>
+                    <span className="block text-xs text-text-secondary">Arrange a safe time and place with the seller after ordering.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {fulfillmentMethod === 'DELIVERY' && (
+            <div className="mt-8">
               <div className="flex items-center gap-2 mb-1">
                 <MapPin size={16} className="text-primary" />
                 <h3 className="font-semibold text-text-primary">Delivery address</h3>
@@ -303,34 +343,72 @@ const paymentOptions = [
                 </div>
               )}
             </div>
+            )}
 
             <div className="mt-8">
-              <h3 className="font-semibold text-text-primary mb-1">Payment method</h3>
-              <p className="text-xs text-text-muted mb-3">
-                A payment is filed against the order when you continue, for the full total shown.
-              </p>
-              <div className="space-y-2.5">
-                {paymentOptions.map((option) => (
-                  <label
-                    key={option.id}
-                    className={`flex items-center gap-3 p-4 border rounded-2xl cursor-pointer transition-all duration-200 ${
-                      paymentMethod === option.id
-                        ? 'border-primary bg-primary-muted shadow-sm shadow-primary/10'
-                        : 'border-border hover:border-lavender-dark hover:bg-lavender/30'
-                    }`}
-                  >
+              <h3 className="font-semibold text-text-primary mb-1">Payment</h3>
+              <div className="mt-3 space-y-2">
+                <label className="flex items-start gap-3 rounded-xl border border-border p-3">
+                  <input
+                    type="radio"
+                    name="payment-method"
+                    value="EFT"
+                    checked={paymentMethod === 'EFT'}
+                    onChange={() => setPaymentMethod('EFT')}
+                    className="mt-1 accent-primary"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-text-primary">EFT to each seller</span>
+                    <span className="block text-xs text-text-secondary">
+                      You will see each seller’s bank details and a unique payment reference after placing the order.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 rounded-xl border border-border p-3">
+                  <input
+                    type="radio"
+                    name="payment-method"
+                    value="CASH_ON_PICKUP"
+                    checked={paymentMethod === 'CASH_ON_PICKUP'}
+                    onChange={() => setPaymentMethod('CASH_ON_PICKUP')}
+                    disabled={fulfillmentMethod !== 'MEETUP'}
+                    className="mt-1 accent-primary"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-text-primary">Cash at meetup</span>
+                    <span className="block text-xs text-text-secondary">
+                      Pay each seller in cash when you meet. The seller confirms receipt.
+                    </span>
+                  </span>
+                </label>
+                {simulationEnabled && (
+                  <label className="flex items-start gap-3 rounded-xl border border-border p-3">
                     <input
                       type="radio"
-                      name="payment"
-                      value={option.id}
-                      checked={paymentMethod === option.id}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="w-4 h-4 text-primary focus:ring-primary accent-primary"
+                      name="payment-method"
+                      value="SANDBOX"
+                      checked={paymentMethod === 'SANDBOX'}
+                      onChange={() => setPaymentMethod('SANDBOX')}
+                      className="mt-1 accent-primary"
                     />
-                    <span className="text-text-primary font-medium">{option.label}</span>
+                    <span>
+                      <span className="block text-sm font-medium text-text-primary">Sandbox test</span>
+                      <span className="block text-xs text-text-secondary">
+                        Test only. No real payment is taken.
+                      </span>
+                    </span>
                   </label>
-                ))}
+                )}
               </div>
+              {simulationEnabled ? (
+                <p className="text-sm text-text-secondary">
+                  EFT and meetup cash payments are handled directly between buyer and seller. No card details are collected.
+                </p>
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  No card gateway is connected. Choose EFT or cash at meetup. No money is taken at checkout.
+                </p>
+              )}
             </div>
           </div>
 
@@ -358,13 +436,14 @@ const paymentOptions = [
                 size="lg"
                 className="mt-5"
                 onClick={proceedToCheckout}
-                disabled={placing || items.length === 0 || addressesLoading || !hasAddresses}
+                disabled={placing || items.length === 0
+                  || (fulfillmentMethod === 'DELIVERY' && (addressesLoading || !hasAddresses))}
               >
                 <Lock size={16} />
-                {placing ? 'Placing order…' : `Proceed to buy · ${formatPrice(total)}`}
+                {placing ? 'Placing order…' : `Place order · ${formatPrice(total)}`}
               </Button>
 
-              {shippingAddressId && (
+              {fulfillmentMethod === 'DELIVERY' && shippingAddressId && (
                 <p className="mt-3 text-xs text-text-muted">
                   Delivering to{' '}
                   {savedAddresses.find((a) => a.id === shippingAddressId)?.singleLine

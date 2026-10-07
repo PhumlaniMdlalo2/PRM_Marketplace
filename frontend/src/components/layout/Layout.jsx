@@ -5,7 +5,7 @@ const Layout = ({ children, showNav = true, className = '' }) => {
   return (
     <div className={`min-h-dvh bg-white ${className}`}>
       {showNav && <TopNavigation />}
-      <main id="main-content" className={showNav ? 'lg:pb-12 pb-24' : 'pb-4'}>
+      <main id="main-content" className={showNav ? 'lg:pt-6 lg:pb-12 pb-24' : 'pb-4'}>
         {children}
       </main>
       {showNav && <BottomNavigation />}

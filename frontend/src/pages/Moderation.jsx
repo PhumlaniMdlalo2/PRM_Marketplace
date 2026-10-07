@@ -1,22 +1,23 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Gavel } from 'lucide-react';
+import { ArrowLeft, Gavel } from 'lucide-react';
 import Layout from '../components/layout/Layout';
 import BackButton from '../components/ui/BackButton';
 import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import { listReportsForModeration, resolveReport } from '../api/reports';
+import { listVendorProfiles, setVendorVerification } from '../api/vendorProfile';
 import { useAuth } from '../auth/useAuth';
 import { useAsync } from '../hooks/useAsync';
 
 /**
  * The moderation queue.
  *
- * The backend has always had a faculty-only view of every report filed against the marketplace and
+ * The backend has always had an admin-only view of every report filed against the marketplace and
  * a route to decide on one, and nothing in the app called either: complaints arrived, sat in the
  * table, and the only people who could act on them had no screen to act from.
  *
- * The role check below is a courtesy rather than a control — the service answers a non-faculty
+ * The role check below is a courtesy rather than a control — the service answers a non-admin
  * caller with an empty list, and every route here is protected server-side too. Its purpose is that
  * a student who follows the link is told why the page is empty instead of being shown a queue that
  * mysteriously has nothing in it.
@@ -160,16 +161,66 @@ const ReportRow = ({ report, onChanged }) => {
   );
 };
 
+const SellerReviewRow = ({ profile, onChanged }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const toggleApproval = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await setVendorVerification(profile.id, !profile.verified));
+    } catch (caught) {
+      setError(caught?.message || 'The seller decision could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="flex items-start justify-between gap-4 p-4 flex-wrap">
+      <div className="min-w-0">
+        <h3 className="font-semibold text-text-primary">{profile.businessName}</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          {profile.registrationNo ? `Registration number: ${profile.registrationNo}` : 'No registration number supplied'}
+        </p>
+        <p className={`mt-1 text-xs font-medium ${profile.verified ? 'text-green-700' : 'text-warning'}`}>
+          {profile.verified ? 'Approved' : 'Pending admin approval'}
+        </p>
+        {error && <p role="alert" className="mt-2 text-xs text-error">{error}</p>}
+      </div>
+      <Button
+        size="sm"
+        variant={profile.verified ? 'secondary' : 'primary'}
+        onClick={toggleApproval}
+        disabled={busy}
+      >
+        {busy ? 'Saving…' : profile.verified ? 'Withdraw approval' : 'Approve seller'}
+      </Button>
+    </li>
+  );
+};
+
 const Moderation = () => {
   const { user } = useAuth();
-  const isFaculty = user?.role === 'FACULTY';
+  const isAdmin = user?.role === 'ADMIN';
 
   const load = useCallback(async () => {
-    if (!isFaculty) return [];
+    if (!isAdmin) return [];
     return listReportsForModeration();
-  }, [isFaculty]);
+  }, [isAdmin]);
 
   const { data: reports, loading, error, setData } = useAsync(load);
+  const loadSellers = useCallback(
+    () => (isAdmin ? listVendorProfiles() : Promise.resolve([])),
+    [isAdmin],
+  );
+  const {
+    data: sellerProfiles,
+    loading: sellersLoading,
+    error: sellersError,
+    setData: setSellerProfiles,
+  } = useAsync(loadSellers);
   const [filter, setFilter] = useState(null);
 
   const list = reports ?? [];
@@ -181,32 +232,46 @@ const Moderation = () => {
       : current));
   }, [setData]);
 
+  const applySellerUpdate = useCallback((updated) => {
+    setSellerProfiles((current) => (Array.isArray(current)
+      ? current.map((profile) => (profile.id === updated.id ? updated : profile))
+      : current));
+  }, [setSellerProfiles]);
+
   return (
     <Layout showNav={false}>
       <div className="app-container py-6 pb-24 max-w-3xl mx-auto">
         <div className="flex items-center gap-4 mb-6">
           <BackButton />
-          <h1 className="text-xl font-bold text-text-primary tracking-tight">Moderation</h1>
+          <div>
+            {isAdmin && (
+              <Link to="/admin" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                <ArrowLeft size={14} aria-hidden="true" />
+                Admin overview
+              </Link>
+            )}
+            <h1 className="text-xl font-bold text-text-primary tracking-tight">Moderation</h1>
+          </div>
         </div>
 
-        {!isFaculty && (
+        {!isAdmin && (
           <EmptyState
             icon={Gavel}
-            title="Moderation is for faculty accounts"
-            description="Reports are handled by the faculty account that moderates the marketplace."
+            title="Moderation is for admin accounts"
+            description="Reports are handled by the admin account that moderates the marketplace."
             action={
-              <Link to="/" className="text-sm font-medium text-primary">Back to the marketplace</Link>
+              <Link to="/marketplace" className="text-sm font-medium text-primary">Back to the marketplace</Link>
             }
           />
         )}
 
-        {isFaculty && error && (
+        {isAdmin && error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-2xl mb-4" role="alert">
             <p className="text-sm text-red-800">The queue could not be loaded. Please try again.</p>
           </div>
         )}
 
-        {isFaculty && (
+        {isAdmin && (
           <>
             <div className="flex gap-2 overflow-x-auto pb-4" aria-label="Filter reports">
               {FILTERS.map((option) => (
@@ -258,6 +323,41 @@ const Moderation = () => {
                 ))}
               </ul>
             )}
+
+            <section className="mt-10">
+              <h2 className="text-lg font-bold text-text-primary">Seller applications</h2>
+              <p className="mt-1 mb-4 text-sm text-text-secondary">
+                Review store details and approve sellers before they can publish listings or sell.
+              </p>
+              {sellersError && (
+                <p role="alert" className="mb-4 text-sm text-error">
+                  Seller profiles could not be loaded. Please try again.
+                </p>
+              )}
+              {sellersLoading && (!sellerProfiles || sellerProfiles.length === 0) && (
+                <div className="h-20 rounded-2xl bg-lavender animate-pulse" role="status">
+                  <span className="sr-only">Loading seller applications</span>
+                </div>
+              )}
+              {!sellersLoading && !sellersError && (sellerProfiles ?? []).length === 0 && (
+                <EmptyState
+                  icon={Gavel}
+                  title="No seller applications"
+                  description="New vendor and student seller applications will appear here."
+                />
+              )}
+              {(sellerProfiles ?? []).length > 0 && (
+                <ul className="bg-white border border-border rounded-2xl divide-y divide-border overflow-hidden">
+                  {sellerProfiles.map((profile) => (
+                    <SellerReviewRow
+                      key={profile.id}
+                      profile={profile}
+                      onChanged={applySellerUpdate}
+                    />
+                  ))}
+                </ul>
+              )}
+            </section>
           </>
         )}
       </div>

@@ -199,10 +199,11 @@ class BulletinPostServiceImplTest {
     }
 
     @Test
-    @DisplayName("getAll returns every post")
-    void getAll_returnsEveryPost() {
+    @DisplayName("the public board lists only posts outside student groups")
+    void getAll_returnsOnlyPublicPosts() {
         BulletinPost stored = buildPost(authorId);
-        when(bulletinPostRepository.findAll()).thenReturn(List.of(stored));
+        when(bulletinPostRepository.findByStudentGroupIsNullOrderByCreatedAtDesc())
+                .thenReturn(List.of(stored));
 
         assertThat(service.getAll()).containsExactly(stored);
     }

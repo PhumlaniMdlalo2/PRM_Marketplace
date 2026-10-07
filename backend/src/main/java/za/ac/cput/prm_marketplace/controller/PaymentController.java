@@ -6,6 +6,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentSimulationOutcome;
+import za.ac.cput.prm_marketplace.dto.PaymentInstruction;
 import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IPaymentService;
 
@@ -49,6 +51,11 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getByUserId(CurrentCaller.id(authentication)));
     }
 
+    @GetMapping("/simulation")
+    public ResponseEntity<Boolean> simulationEnabled() {
+        return ResponseEntity.ok(paymentService.isSimulationEnabled());
+    }
+
     /**
      * One of the caller's own payments. A payment belonging to another account is reported as
      * not found rather than forbidden, so the response cannot be used to probe for valid ids.
@@ -89,10 +96,43 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getByOrderId(orderId, CurrentCaller.id(authentication)));
     }
 
+    @GetMapping("/order/{orderId}/instructions")
+    public ResponseEntity<List<PaymentInstruction>> getPaymentInstructions(
+            @PathVariable UUID orderId, Authentication authentication) {
+        return ResponseEntity.ok(paymentService.getPaymentInstructions(orderId, CurrentCaller.id(authentication)));
+    }
+
+    @GetMapping("/seller")
+    public ResponseEntity<List<PaymentInstruction>> getSellerPayments(Authentication authentication) {
+        return ResponseEntity.ok(paymentService.getSellerPayments(
+                CurrentCaller.id(authentication), CurrentCaller.role(authentication)));
+    }
+
+    @PostMapping("/{id}/confirm-receipt")
+    public ResponseEntity<Payment> confirmReceipt(@PathVariable UUID id, Authentication authentication) {
+        Payment payment = paymentService.confirmReceipt(id,
+                CurrentCaller.id(authentication), CurrentCaller.role(authentication));
+        if (payment == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(payment);
+    }
+
+    @PostMapping("/{id}/simulate")
+    public ResponseEntity<Payment> simulate(@PathVariable UUID id,
+                                            @RequestParam PaymentSimulationOutcome outcome,
+                                            Authentication authentication) {
+        Payment payment = paymentService.simulate(id, outcome, CurrentCaller.id(authentication));
+        if (payment == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(payment);
+    }
+
     /**
      * Moves the caller's own payment through its lifecycle.
      *
-     * <p>Settling a payment -- COMPLETED, FAILED or REFUNDED -- requires FACULTY. For anyone else the
+     * <p>Settling a payment -- COMPLETED, FAILED or REFUNDED -- requires ADMIN. For anyone else the
      * service refuses the change and this reports the payment as not found, so a buyer cannot mark
      * their own attempt as paid or failed. Retrying (PENDING) stays open to the payer.
      *

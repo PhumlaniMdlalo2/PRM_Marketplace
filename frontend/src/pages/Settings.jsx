@@ -10,7 +10,11 @@ import Layout from '../components/layout/Layout';
 import { useAsync } from '../hooks/useAsync';
 import { useAuth } from '../auth/useAuth';
 import { changePassword } from '../api/auth';
-import { getMyVendorProfile, createVendorProfile, updateVendorProfile } from '../api/vendorProfile';
+import {
+  getMyVendorProfile, createVendorProfile, updateVendorProfile,
+  getMyPayoutDetails, updateMyPayoutDetails,
+} from '../api/vendorProfile';
+import { confirmPaymentReceipt, listSellerPayments } from '../api/payments';
 import {
   createAddress, deleteAddress, listAddresses, setDefaultAddress, updateAddress,
 } from '../api/addresses';
@@ -151,14 +155,14 @@ const SellerProfilePanel = ({ role }) => {
   const [success, setSuccess] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // Only a VENDOR account may hold a seller profile, so for anyone else there is nothing to show and
-  // nothing to try: the server answers 400 for every attempt.
-  if (role !== 'VENDOR') {
+  // Vendor accounts get a profile during signup; students may apply later while keeping their
+  // STUDENT role. Other account types cannot create seller profiles.
+  if (role !== 'VENDOR' && role !== 'STUDENT') {
     return (
       <Panel>
         <p className="text-sm text-text-secondary">
-          Selling on the marketplace needs a seller profile, which is only available on a vendor
-          account. This account is signed in as {role.toLowerCase()}.
+          Selling on the marketplace is available to student and vendor accounts. This account is
+          signed in as {role.toLowerCase()}.
         </p>
       </Panel>
     );
@@ -187,11 +191,13 @@ const SellerProfilePanel = ({ role }) => {
     setBusy(true);
     try {
       if (profile) {
-        await updateVendorProfile(profile.id, values);
-        setSuccess('Seller profile updated.');
+        const updated = await updateVendorProfile(profile.id, values);
+        setSuccess(updated.verified
+          ? 'Seller profile updated.'
+          : 'Seller details updated. Admin approval is required before you can publish listings.');
       } else {
         await createVendorProfile(values);
-        setSuccess('Seller profile created. You can list items now.');
+        setSuccess('Seller application submitted. Admin approval is required before you can list items.');
       }
       setForm(null);
       // Refetched rather than patched locally: verified and ratingAvg are the server's to set, and
@@ -199,7 +205,7 @@ const SellerProfilePanel = ({ role }) => {
       await run();
     } catch (caught) {
       setError(caught.status === 400 && !profile
-        ? 'The server rejected that. A vendor account may only hold one seller profile.'
+        ? 'The server rejected that. This account may only hold one seller profile.'
         : caught.message);
     } finally {
       setBusy(false);
@@ -212,7 +218,7 @@ const SellerProfilePanel = ({ role }) => {
         <p className="text-sm text-text-secondary">
           {profile.verified
             ? 'This seller profile is verified.'
-            : 'Not verified yet. Verified sellers show a badge on their listings.'}
+            : 'Pending admin approval. You cannot publish listings until your seller profile is approved.'}
         </p>
       )}
       <form onSubmit={submit} className="space-y-3" noValidate>
@@ -221,6 +227,7 @@ const SellerProfilePanel = ({ role }) => {
           name="businessName"
           value={values.businessName}
           onChange={set('businessName')}
+          maxLength={120}
         />
         <Input
           label="Registration number"
@@ -228,13 +235,169 @@ const SellerProfilePanel = ({ role }) => {
           placeholder="Optional"
           value={values.registrationNo}
           onChange={set('registrationNo')}
+          maxLength={120}
         />
         <Feedback error={error} success={success} />
         <Button type="submit" disabled={busy}>
-          {busy ? 'Saving…' : profile ? 'Save seller profile' : 'Create seller profile'}
+          {busy ? 'Saving…' : profile ? 'Save seller profile' : 'Apply to become a seller'}
         </Button>
       </form>
+      {profile?.verified && (
+        <>
+          <PayoutDetailsPanel />
+          <SellerPaymentsPanel />
+        </>
+      )}
     </Panel>
+  );
+};
+
+const PayoutDetailsPanel = () => {
+  const load = useCallback(() => getMyPayoutDetails(), []);
+  const { data, loading, error: loadError, run } = useAsync(load);
+  const [form, setForm] = useState(null);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const values = form ?? {
+    accountHolder: data?.accountHolder ?? '',
+    bankName: data?.bankName ?? '',
+    accountNumber: data?.accountNumber ?? '',
+    branchCode: data?.branchCode ?? '',
+    accountType: data?.accountType ?? 'CURRENT',
+  };
+  const set = (name) => (event) => setForm({ ...values, [name]: event.target.value });
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+    if (!/^[0-9]{6,20}$/.test(values.accountNumber.trim())) {
+      setError('Enter an account number containing 6 to 20 digits.');
+      return;
+    }
+    if (!/^[0-9]{4,10}$/.test(values.branchCode.trim())) {
+      setError('Enter a branch code containing 4 to 10 digits.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateMyPayoutDetails(values);
+      setForm(null);
+      setSuccess('EFT payout details saved. They are only shared with buyers who choose EFT at checkout.');
+      await run();
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) return <div className="h-24 animate-pulse rounded-xl bg-lavender" />;
+  if (loadError && loadError.status !== 404) {
+    return <Feedback error={loadError.message || 'Could not load payout details.'} />;
+  }
+
+  return (
+    <div className="border-t border-border pt-4">
+      <h3 className="font-semibold text-text-primary">EFT payout details</h3>
+      <p className="mt-1 text-xs text-text-secondary">
+        We check the account and branch code formats, but cannot verify that the account exists or belongs to you.
+        Confirm the details with your bank. Buyers see them only for orders assigned to your shop. Never enter card numbers or security codes.
+      </p>
+      <form onSubmit={submit} className="mt-3 space-y-3" noValidate>
+        <Input label="Account holder" name="accountHolder" value={values.accountHolder}
+          onChange={set('accountHolder')} maxLength={120} />
+        <Input label="Bank" name="bankName" value={values.bankName}
+          onChange={set('bankName')} maxLength={120} />
+        <Input label="Account number" name="accountNumber" inputMode="numeric"
+          value={values.accountNumber} onChange={set('accountNumber')} maxLength={20} />
+        <Input label="Branch code" name="branchCode" inputMode="numeric"
+          value={values.branchCode} onChange={set('branchCode')} maxLength={10} />
+        <label className="block text-sm font-medium text-text-primary">
+          Account type
+          <select
+            name="accountType"
+            value={values.accountType}
+            onChange={set('accountType')}
+            className="mt-1 block w-full rounded-xl border border-border bg-white px-3 py-2 text-text-primary"
+          >
+            <option value="CURRENT">Current</option>
+            <option value="SAVINGS">Savings</option>
+            <option value="TRANSMISSION">Transmission</option>
+          </select>
+        </label>
+        <Feedback error={error} success={success} />
+        <Button type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save EFT details'}
+        </Button>
+      </form>
+    </div>
+  );
+};
+
+const SellerPaymentsPanel = () => {
+  const load = useCallback(() => listSellerPayments(), []);
+  const { data: payments, loading, error: loadError, run } = useAsync(load);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+
+  const confirm = async (payment) => {
+    setBusyId(payment.paymentId);
+    setError(null);
+    try {
+      await confirmPaymentReceipt(payment.paymentId);
+      await run();
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-4">
+      <h3 className="font-semibold text-text-primary">Payments to confirm</h3>
+      <p className="mt-1 text-xs text-text-secondary">
+        Confirm an EFT only after funds clear in your bank account. Confirm cash only after you receive it at pickup.
+      </p>
+      {loading ? (
+        <div className="mt-3 h-20 animate-pulse rounded-xl bg-lavender" />
+      ) : loadError ? (
+        <Feedback error={loadError.message || 'Could not load seller payments.'} />
+      ) : !payments?.length ? (
+        <p className="mt-3 text-sm text-text-secondary">No seller payments yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {payments.map((payment) => (
+            <li key={payment.paymentId} className="rounded-xl border border-border p-3">
+              <p className="text-sm font-medium text-text-primary">
+                {payment.method === 'CASH_ON_PICKUP' ? 'Cash on pickup' : 'EFT'} · {payment.status}
+              </p>
+              <p className="mt-1 text-sm text-text-secondary">
+                {payment.amount} | Order {payment.orderId}
+              </p>
+              <p className="text-xs text-text-muted">Reference: {payment.transactionReference}</p>
+              {payment.status === 'PENDING' && (
+                <Button
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => confirm(payment)}
+                  disabled={Boolean(busyId)}
+                >
+                  {busyId === payment.paymentId
+                    ? 'Confirming…'
+                    : payment.method === 'CASH_ON_PICKUP'
+                      ? 'Confirm cash received'
+                      : 'Confirm cleared EFT'}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <Feedback error={error} />
+    </div>
   );
 };
 
@@ -587,13 +750,21 @@ const Settings = () => {
               </Row>
               {/* The queue is a destination rather than a form, so it carries no chevron — a row
                   with children promises an expansion that would never come. */}
-              {user?.role === 'FACULTY' && (
-                <Row
-                  icon={Gavel}
-                  label="Moderation"
-                  hint="Reports waiting on a decision"
-                  onToggle={() => navigate('/moderation')}
-                />
+              {user?.role === 'ADMIN' && (
+                <>
+                  <Row
+                    icon={Shield}
+                    label="Admin dashboard"
+                    hint="Marketplace reports, sellers and accounts"
+                    onToggle={() => navigate('/admin')}
+                  />
+                  <Row
+                    icon={Gavel}
+                    label="Moderation"
+                    hint="Reports waiting on a decision"
+                    onToggle={() => navigate('/admin/moderation')}
+                  />
+                </>
               )}
             </div>
           </section>

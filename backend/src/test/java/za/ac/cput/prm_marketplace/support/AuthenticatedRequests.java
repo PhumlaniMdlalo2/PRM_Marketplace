@@ -33,7 +33,7 @@ public final class AuthenticatedRequests {
         return as(userId, Role.STUDENT);
     }
 
-    public static RequestPostProcessor asFaculty(UUID userId) {
-        return as(userId, Role.FACULTY);
+    public static RequestPostProcessor asAdmin(UUID userId) {
+        return as(userId, Role.ADMIN);
     }
 }

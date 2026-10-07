@@ -39,12 +39,47 @@ on a laptop with a local MySQL; none of them are safe for a real deployment.
 | `DB_URL` | no | `jdbc:mysql://localhost:3306/prm_marketplace?createDatabaseIfNotExist=true` | Note the default *creates* the database if it is absent, using whatever credentials below are set. |
 | `DB_USERNAME` | no | `root` | |
 | `DB_PASSWORD` | no | `password` | |
-| `MAIL_HOST` | no | `localhost` | Defaults to port 1025, the Mailpit/MailHog convention. |
-| `MAIL_PORT` | no | `1025` | |
-| `MAIL_USERNAME` | no | `noreply@prm-marketplace.local` | Doubles as the From address, so setting it is what makes mail deliverable. |
+| `MAIL_HOST` | no | `smtp-relay.brevo.com` | Brevo SMTP relay host. |
+| `MAIL_PORT` | no | `587` | SMTP submission port. |
+| `MAIL_USERNAME` | no | `your-smtp-login` | Brevo SMTP login (usually the login or API key user, not necessarily the same as the From address). |
+| `MAIL_PASSWORD` | no | none | Brevo SMTP key or password for the SMTP relay. |
+| `MAIL_FROM` | no | `noreply@prm-marketplace.local` | Actual sender address on verification and password-reset emails. |
+| `FRONTEND_URL` | no | `http://localhost:5173` | Frontend origin used for order tracking links in customer emails. Set this to the deployed frontend origin in production. |
 | `CORS_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:3000` | Comma separated, explicit origins only. A `*` is refused at startup, and so is an empty list — see below. |
-| `FACULTY_EMAIL` | no | none | See the next section. |
+| `ADMIN_EMAIL` | no | `admin.vendra@gmail.com` | Admin account provisioned at startup. |
+
+Orders can be placed for delivery or meetup. Delivery uses the buyer's saved address and includes an
+estimated date five business days after checkout (weekends excluded); meetup arrangements are made
+between buyer and seller through marketplace messages. Order confirmation and status emails contain
+the marketplace order reference and a link to the in-app progress page. Progress reflects seller
+updates in the marketplace; it is not live carrier or GPS tracking. Email delivery requires valid
+SMTP configuration. A failed order email is logged and does not undo checkout or an order update.
+| `ADMIN_PASSWORD` | no | generated | Initial password for the admin account. Keep it in local environment configuration, never in source control. |
+| `PAYMENT_SIMULATION_ENABLED` | no | `false` | Enables buyer-selected sandbox success/failure results. Development only, never enable in production. |
 | `JWT_EXPIRATION_MS` | no | `86400000` | 24 hours. |
+
+## Signup and selling
+
+Signup offers three account types:
+
+- **Student:** must use an `.ac.za` or `.edu.za` email address and complete the emailed verification
+  code. This supports academic institutions beyond CPUT.
+- **Vendor:** requires a business/store name and may include a business registration number. Email
+  verification is followed by admin review of the seller profile.
+- **Community member:** uses any valid email address and is stored as a `RESIDENT` account.
+
+Students keep the `STUDENT` role when they decide to sell. They apply for a seller profile in
+Settings using the same business details as a vendor account. Seller profiles begin unverified, and
+admin approval is required before a vendor or student seller can publish or sell listings. The
+backend enforces approval for listing creation, public catalogue/detail reads, reactivation, and
+checkout; it is not just a frontend badge.
+
+Students can set a campus in their profile. The public catalogue accepts an optional `campus` search
+filter to find sellers whose student profile matches that campus. Student discussion groups are
+campus-scoped: students can create, join, and post only in groups for their current campus. Group
+membership and campus are checked on the server for posts, comments, and likes; group threads do
+not appear in the public bulletin. Campus is self-selected and is not independently verified by
+the application.
 
 ### CORS
 
@@ -54,33 +89,59 @@ or blank list is rejected too, for a less obvious reason: it produces a configur
 nothing, which starts cleanly and then fails every cross-origin request once traffic arrives, with an
 error that points at the frontend rather than at configuration.
 
-## Faculty accounts
+## Admin accounts
 
-Faculty supervises orders, refunds payments, resolves reports and verifies sellers. None of that is
-reachable by self-registration — a self-chosen role would be an escalation — so **the application
-ships with no faculty account at all**. That is the correct state for a fresh clone: the privileged
-routes stay unreachable rather than being served by a login published in version control.
+Admin supervises orders, refunds payments, resolves reports and verifies sellers. None of that is
+reachable by self-registration. The application provisions the configured admin address at startup
+and never stores an initial password in source control.
 
-To promote an address at startup:
+The frontend provides a separate sign-in at `/admin/login` and an admin console at `/admin`.
+The console includes report and seller review, plus account listing and deletion. Order status
+changes and payment settlement remain API-only for now.
 
-```bash
-FACULTY_EMAIL=dean@example.ac.za ./mvnw spring-boot:run
+### Sandbox payments
+
+There is no payment gateway connected. In local development, enable the explicit sandbox simulator:
+
+```powershell
+$env:PAYMENT_SIMULATION_ENABLED = "true"
+.\mvnw.cmd spring-boot:run
 ```
 
-An account that already exists is promoted; one that does not is created with a random password that
-is deliberately never logged. Either way the account is claimed through the password-reset flow:
+Checkout records a pending `SANDBOX` payment and never asks for card details. On the order detail
+page, the buyer can explicitly simulate success or failure and retry a failed attempt. This records
+test state only; it does not transfer money. Keep `PAYMENT_SIMULATION_ENABLED=false` in production.
+With simulation disabled, checkout still records a pending payment for manual admin verification.
+
+The application provisions `admin.vendra@gmail.com` at startup by default. Set the initial
+password through the environment before starting the backend:
+
+```bash
+ADMIN_PASSWORD='choose-a-strong-password' ./mvnw spring-boot:run
+```
+
+Set `ADMIN_EMAIL` only if you want a different admin address. A non-empty `ADMIN_PASSWORD` is
+applied at startup to the configured admin account, including an account that is already admin.
+Leave it unset to keep the existing password. Keep the setting in local environment configuration,
+not source control.
+
+An account that already exists is promoted; if it does not exist, it is created with the configured
+initial password or, when none is supplied, a random password that is never logged. To use the
+random-password fallback, claim the account through the password-reset flow:
 
 ```bash
 curl -X POST http://localhost:8080/api/auth/forgot-password \
   -H 'Content-Type: application/json' \
-  -d '{"email":"dean@example.ac.za"}'
+  -d '{"email":"admin.vendra@gmail.com"}'
 ```
 
-> **This depends on mail working.** The reset email is the only way in, and mail failures are logged
-> and swallowed rather than failing the request. If the mail server is unreachable, a freshly
-> provisioned faculty account cannot be claimed at all. `GET /actuator/health/readiness` reports this:
-> it includes the mail indicator and answers 503 while mail is down. Liveness deliberately does not,
-> since restarting the process would not fix mail.
+> **This depends on mail working.** The reset email is the only way in. Reset-mail delivery failures
+> are logged without changing the privacy-preserving response; if mail is unreachable, an admin
+> account using the random-password fallback cannot be claimed until delivery works. Verification mail failures
+> return 503, and the registration/resend request reports that delivery failed. Configure the Brevo
+> SMTP credentials above and check `GET /actuator/health/readiness`, which includes the mail
+> indicator and answers 503 while mail is down. Liveness deliberately does not, since restarting the
+> process would not fix mail.
 
 ## Health
 

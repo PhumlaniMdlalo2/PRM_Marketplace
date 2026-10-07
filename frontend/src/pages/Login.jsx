@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Mail, Globe } from 'lucide-react';
+import { Mail } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { useAuth } from '../auth/useAuth';
@@ -22,6 +22,7 @@ const Login = () => {
   });
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Where to go once signed in. ProtectedRoute puts the path the user was trying to reach in
@@ -35,7 +36,7 @@ const Login = () => {
   const destination =
     typeof attempted === 'string' && attempted.startsWith('/') && !attempted.startsWith('//')
       ? attempted
-      : '/';
+      : '/marketplace';
 
   // Someone already signed in has no business on this page. This has to be an effect: navigating
   // during render is not allowed, and returning early would render the redirect page instead of
@@ -47,6 +48,7 @@ const Login = () => {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value });
+    setNeedsVerification(false);
     if (errors[name]) setErrors({ ...errors, [name]: undefined });
     if (formError) setFormError(null);
   };
@@ -68,6 +70,7 @@ const Login = () => {
 
     setSubmitting(true);
     setFormError(null);
+    setNeedsVerification(false);
     try {
       await signIn(formData.email.trim(), formData.password, { persistent: formData.rememberMe });
       navigate(destination, { replace: true });
@@ -75,6 +78,7 @@ const Login = () => {
       // The backend answers a wrong email and a wrong password identically on purpose, so there
       // is no way to tell the user which one was wrong without helping whoever is guessing.
       setFormError(caught.message);
+      setNeedsVerification(caught.message === 'Account is not verified yet');
       if (caught.fieldErrors) setErrors(caught.fieldErrors);
     } finally {
       setSubmitting(false);
@@ -100,6 +104,15 @@ const Login = () => {
           >
             {formError}
           </div>
+        )}
+        {needsVerification && (
+          <Link
+            to="/verification"
+            state={{ email: formData.email.trim() }}
+            className="block text-sm font-semibold text-primary hover:underline"
+          >
+            Verify your account or request a new code
+          </Link>
         )}
 
         <Input
@@ -147,27 +160,12 @@ const Login = () => {
           </Button>
         </div>
       </form>
-      
-      <div className="mt-8" role="separator" aria-label="Or continue with">
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-border"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-3 bg-white text-text-muted">or</span>
-          </div>
-        </div>
-        
-        <div className="mt-6 space-y-3">
-          <Button variant="secondary" size="lg">
-            <Globe size={18} />
-            Continue with Google
-          </Button>
-          <Button variant="secondary" size="lg">
-            Continue with Facebook
-          </Button>
-        </div>
-      </div>
+      <p className="mt-6 text-center text-sm text-text-muted">
+        Marketplace staff?{' '}
+        <Link to="/admin/login" className="font-semibold text-primary hover:underline">
+          Admin sign in
+        </Link>
+      </p>
       </div>
     </div>
   );

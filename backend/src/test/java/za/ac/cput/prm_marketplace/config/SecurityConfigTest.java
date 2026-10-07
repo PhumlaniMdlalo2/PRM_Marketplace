@@ -81,7 +81,7 @@ class SecurityConfigTest {
                 "jwt-token", "refresh-token", "Bearer", 3600L,
                 new za.ac.cput.prm_marketplace.dto.UserResponse(
                         UUID.randomUUID(), "Jane", "jane@example.com",
-                        za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, false, null)));
+                        za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, null, false, null)));
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType("application/json")
@@ -98,7 +98,7 @@ class SecurityConfigTest {
                         "jwt-token", "another-refresh-token", "Bearer", 3600L,
                         new za.ac.cput.prm_marketplace.dto.UserResponse(
                                 UUID.randomUUID(), "Jane", "jane@example.com",
-                                za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, true, null)));
+                                za.ac.cput.prm_marketplace.domain.Role.STUDENT, null, null, null, true, null)));
 
         // The service answering at all is the assertion: a protected route would be stopped by the
         // filter chain with 401 before the controller was reached, whatever the mock returned.
@@ -238,7 +238,7 @@ class SecurityConfigTest {
     void readiness_reportsUnreachableMail() throws Exception {
         // Nothing is listening on the test mail port, and until health existed that was invisible:
         // sends were logged and swallowed, the request still returned success, and the only way to
-        // claim a bootstrapped faculty account was an email that never arrived.
+        // claim a bootstrapped admin account was an email that never arrived.
         mockMvc.perform(get("/actuator/health/readiness"))
                 .andExpect(status().isServiceUnavailable());
 

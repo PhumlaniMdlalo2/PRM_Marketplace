@@ -20,7 +20,7 @@ public interface IUserService {
      *
      * @return the saved account, or null when {@code userId} does not exist
      */
-    User updateProfile(UUID userId, String name, String phone, String avatarUrl);
+    User updateProfile(UUID userId, String name, String phone, String avatarUrl, String campus);
 
     boolean delete(UUID id);
 

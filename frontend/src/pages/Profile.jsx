@@ -35,7 +35,8 @@ import { unreadCount } from '../api/messages';
 const ROLE_LABEL = {
   STUDENT: 'Student',
   VENDOR: 'Vendor',
-  FACULTY: 'Faculty',
+  RESIDENT: 'Community member',
+  ADMIN: 'Admin',
 };
 
 /** Reads a settled promise's value, or null when it rejected. */
@@ -51,8 +52,10 @@ const Profile = () => {
       listOrders().then((list) => list.length),
       countSavedItems(),
       unreadCount(),
-      // Only a vendor can hold one, so asking on any other role would just be a guaranteed 404.
-      me.role === 'VENDOR' ? getMyVendorProfile().then(() => true) : Promise.resolve(false),
+      // Students may apply to sell without changing their account role, just like vendors.
+      me.role === 'VENDOR' || me.role === 'STUDENT'
+        ? getMyVendorProfile()
+        : Promise.resolve(null),
     ]);
 
     return {
@@ -60,7 +63,7 @@ const Profile = () => {
       orders: value(orders),
       saved: value(saved),
       unread: value(unread),
-      hasSellerProfile: seller.status === 'fulfilled' ? seller.value : null,
+      sellerProfile: seller.status === 'fulfilled' ? seller.value : null,
     };
   }, []);
 
@@ -71,15 +74,14 @@ const Profile = () => {
   const profile = data?.me ?? sessionUser;
   const roleLabel = ROLE_LABEL[profile?.role] ?? profile?.role ?? '';
   const isVendor = profile?.role === 'VENDOR';
+  const isStudent = profile?.role === 'STUDENT';
+  const canSell = isVendor || isStudent;
 
   const menuItems = [
     { icon: Package, label: 'My orders', path: '/orders', count: data?.orders },
     { icon: Heart, label: 'Saved items', path: '/saved', count: data?.saved },
     { icon: MessageCircle, label: 'Messages', path: '/messages', count: data?.unread },
-    // Only a vendor account has listings to see, so this row is not rendered for anyone else.
-    // Before this the page offered no route to them at all: a seller could create a listing and
-    // then had no way back to it.
-    ...(isVendor ? [{ icon: Store, label: 'My listings', path: '/listing/mine' }] : []),
+    ...(data?.sellerProfile ? [{ icon: Store, label: 'My listings', path: '/listing/mine' }] : []),
   ];
 
   const badge = (text, primary = false) => (
@@ -120,7 +122,7 @@ const Profile = () => {
             </h2>
             <p className="text-sm text-text-secondary truncate">{profile?.email}</p>
             {roleLabel && badge(roleLabel, true)}
-            {data?.hasSellerProfile === true && badge('Seller profile set up')}
+            {data?.sellerProfile && badge(data.sellerProfile.verified ? 'Approved seller' : 'Seller approval pending')}
           </div>
         </div>
 
@@ -145,10 +147,7 @@ const Profile = () => {
           ))}
         </div>
 
-        {/* Selling needs a vendor account, so the shortcut is only offered to one. A student pressing
-            it used to land on a page telling them a seller profile was needed, which is not a thing
-            they can have. */}
-        {isVendor && (
+        {canSell && data?.sellerProfile?.verified && (
           <Link
             to="/listing/create"
             className="mt-6 flex items-center justify-center gap-2 py-3.5 bg-primary text-white font-semibold rounded-2xl shadow-md shadow-primary/20 hover:bg-primary-hover active:scale-[0.98] transition-all duration-200"
@@ -158,13 +157,19 @@ const Profile = () => {
           </Link>
         )}
 
-        {isVendor && data && !data.hasSellerProfile && (
+        {canSell && data && !data.sellerProfile && (
           <p className="mt-3 text-xs text-text-secondary text-center">
             <Store size={12} className="inline mr-1 -mt-0.5" aria-hidden="true" />
-            You need a seller profile before you can list anything.{' '}
+            You can apply to sell from Settings.{' '}
             <Link to="/settings" className="text-primary font-medium underline">
-              Set one up
+              Apply now
             </Link>
+          </p>
+        )}
+
+        {canSell && data?.sellerProfile && !data.sellerProfile.verified && (
+          <p className="mt-3 text-xs text-text-secondary text-center">
+            Seller approval is pending. Admin approval is required before you can publish listings.
           </p>
         )}
 

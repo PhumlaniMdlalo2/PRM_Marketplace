@@ -170,13 +170,13 @@ class ReportServiceImplTest {
     }
 
     @Test
-    @DisplayName("faculty can resolve a report and the resolution is timestamped")
-    void resolve_isAllowedForFaculty() {
+    @DisplayName("admin can resolve a report and the resolution is timestamped")
+    void resolve_isAllowedForAdmin() {
         when(reportRepository.findById(reportId)).thenReturn(Optional.of(buildReport(ReportStatus.OPEN)));
         when(reportRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
         Report resolved = service.resolve(reportId, ReportStatus.RESOLVED, "Vendor corrected the listing",
-                intruderId, Role.FACULTY);
+                intruderId, Role.ADMIN);
 
         assertThat(resolved).isNotNull();
         assertThat(resolved.getStatus()).isEqualTo(ReportStatus.RESOLVED);
@@ -191,7 +191,7 @@ class ReportServiceImplTest {
         when(reportRepository.findById(reportId)).thenReturn(Optional.of(buildReport(ReportStatus.UNDER_REVIEW)));
         when(reportRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-        Report dismissed = service.resolve(reportId, ReportStatus.DISMISSED, "No breach", intruderId, Role.FACULTY);
+        Report dismissed = service.resolve(reportId, ReportStatus.DISMISSED, "No breach", intruderId, Role.ADMIN);
 
         assertThat(dismissed.isResolved()).isTrue();
         assertThat(dismissed.getResolvedAt()).isNotNull();
@@ -205,7 +205,7 @@ class ReportServiceImplTest {
         when(reportRepository.findById(reportId)).thenReturn(Optional.of(alreadyResolved));
         when(reportRepository.save(any())).thenAnswer(call -> call.getArgument(0));
 
-        Report reopened = service.resolve(reportId, ReportStatus.UNDER_REVIEW, null, intruderId, Role.FACULTY);
+        Report reopened = service.resolve(reportId, ReportStatus.UNDER_REVIEW, null, intruderId, Role.ADMIN);
 
         assertThat(reopened.getResolvedAt()).isNull();
         assertThat(reopened.isResolved()).isFalse();
@@ -217,17 +217,17 @@ class ReportServiceImplTest {
         when(reportRepository.findById(reportId)).thenReturn(Optional.of(buildReport(ReportStatus.OPEN)));
 
         // A null target status is rejected outright.
-        assertThat(service.resolve(reportId, null, "done", intruderId, Role.FACULTY)).isNull();
+        assertThat(service.resolve(reportId, null, "done", intruderId, Role.ADMIN)).isNull();
 
         when(reportRepository.findById(reportId)).thenReturn(Optional.empty());
-        assertThat(service.resolve(reportId, ReportStatus.RESOLVED, "done", intruderId, Role.FACULTY)).isNull();
+        assertThat(service.resolve(reportId, ReportStatus.RESOLVED, "done", intruderId, Role.ADMIN)).isNull();
 
         verify(reportRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("the moderation listing is empty for anyone who is not faculty")
-    void moderationListings_areFacultyOnly() {
+    @DisplayName("the moderation listing is empty for anyone who is not admin")
+    void moderationListings_areAdminOnly() {
         assertThat(service.getAll(Role.STUDENT)).isEmpty();
         assertThat(service.getAll(Role.VENDOR)).isEmpty();
         assertThat(service.getAll(Role.RESIDENT)).isEmpty();
@@ -238,15 +238,15 @@ class ReportServiceImplTest {
     }
 
     @Test
-    @DisplayName("faculty can list every report and filter by status")
-    void moderationListings_areAvailableToFaculty() {
+    @DisplayName("admin can list every report and filter by status")
+    void moderationListings_areAvailableToAdmin() {
         Report report = buildReport(ReportStatus.OPEN);
         when(reportRepository.findAll()).thenReturn(List.of(report));
         when(reportRepository.findByStatus(ReportStatus.OPEN)).thenReturn(List.of(report));
 
-        assertThat(service.getAll(Role.FACULTY)).containsExactly(report);
-        assertThat(service.getByStatus(ReportStatus.OPEN, Role.FACULTY)).containsExactly(report);
-        assertThat(service.getByStatus(null, Role.FACULTY)).isEmpty();
+        assertThat(service.getAll(Role.ADMIN)).containsExactly(report);
+        assertThat(service.getByStatus(ReportStatus.OPEN, Role.ADMIN)).containsExactly(report);
+        assertThat(service.getByStatus(null, Role.ADMIN)).isEmpty();
     }
 
     private User buildUser(UUID id) {

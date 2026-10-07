@@ -1,3 +1,6 @@
+
+import { GOODS_CATEGORIES, SERVICE_CATEGORIES } from './marketplaceCategories';
+
 /**
  * Everything the create and edit listing forms share: the option lists, the one place a listing's
  * fields are read and written, and the validation.
@@ -15,17 +18,22 @@ export const CONDITION_OPTIONS = [
   { value: 'POOR', label: 'Poor' },
 ];
 
-/**
- * Category is a free-text column on the server rather than a table, so there is no endpoint to list
- * them. These are the values the seeded marketplace actually uses, and the only ones the search and
- * category routes have ever been pointed at, which makes them the useful suggestions. A seller can
- * still type their own: a category nobody filters on yet is better than not being able to categorise
- * the item at all.
- */
-export const CATEGORY_OPTIONS = ['BIKES', 'ELECTRONICS', 'FURNITURE'];
+/** Suggested values for the marketplace's free-text category field. Sellers can still add their own. */
+export const PRODUCT_CATEGORY_OPTIONS = GOODS_CATEGORIES.map(({ value }) => value.split(',')[0]);
+export const SERVICE_CATEGORY_OPTIONS = SERVICE_CATEGORIES.map(({ value }) => value);
+export const CATEGORY_OPTIONS = [...new Set([
+  ...PRODUCT_CATEGORY_OPTIONS,
+  ...SERVICE_CATEGORY_OPTIONS,
+])];
+
+export const listingTypeForCategory = (category) =>
+  SERVICE_CATEGORY_OPTIONS.some((option) => option.toLowerCase() === category?.toLowerCase())
+    ? 'SERVICE'
+    : 'PRODUCT';
 
 /** Blank form. Quantity starts at 1 rather than 0, because 0 would publish an item nobody can buy. */
 export const emptyListingForm = () => ({
+  listingType: 'PRODUCT',
   name: '',
   category: '',
   price: '',
@@ -54,6 +62,7 @@ export const formatLocation = ({ city, province } = {}) =>
 
 /** Turns a stored product into form values. Price is stringified because the inputs are text. */
 export const listingFromProduct = (product) => ({
+  listingType: listingTypeForCategory(product.category ?? ''),
   name: product.name ?? '',
   category: product.category ?? '',
   price: product.price != null ? String(product.price) : '',
@@ -101,7 +110,9 @@ export const toListingPayload = (values) => {
 export const validateListing = (values) => {
   const errors = {};
 
-  if (!values.name.trim()) errors.name = 'Product name is required';
+  if (!values.name.trim()) {
+    errors.name = values.listingType === 'SERVICE' ? 'Service name is required' : 'Product name is required';
+  }
 
   if (!String(values.price).trim()) {
     errors.price = 'Price is required';

@@ -87,7 +87,7 @@ public class BulletinPostServiceImpl implements IBulletinPostService {
 
     @Override
     public List<BulletinPost> getAll() {
-        return bulletinPostRepository.findAll();
+        return bulletinPostRepository.findByStudentGroupIsNullOrderByCreatedAtDesc();
     }
 
     @Override
@@ -95,7 +95,9 @@ public class BulletinPostServiceImpl implements IBulletinPostService {
         if (authorId == null) {
             return List.of();
         }
-        return bulletinPostRepository.findByAuthorId(authorId);
+        return bulletinPostRepository.findByAuthorId(authorId).stream()
+                .filter(post -> post.getStudentGroup() == null)
+                .toList();
     }
 
     private boolean isAuthor(BulletinPost post, UUID userId) {

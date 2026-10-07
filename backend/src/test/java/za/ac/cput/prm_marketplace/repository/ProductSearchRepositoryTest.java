@@ -55,12 +55,14 @@ class ProductSearchRepositoryTest {
                 .setEmail("vendor-" + System.nanoTime() + "@example.com")
                 .setPasswordHash("hash")
                 .setRole(Role.VENDOR)
+                .setCampus("CPUT - Bellville")
                 .setVerified(true)
                 .build());
 
         vendor = vendorProfileRepository.save(new VendorProfile.Builder()
                 .setUser(user)
                 .setBusinessName("Campus Books")
+                .setVerified(true)
                 .build());
     }
 
@@ -235,12 +237,44 @@ class ProductSearchRepositoryTest {
                 .getContent()).extracting(Product::getName).containsExactly("Laptop");
     }
 
+    @Test
+    @DisplayName("a comma-separated category filter matches any listed category")
+    void categories_matchAnyListedValue() {
+        product("Laptop", "Electronics", "Cape Town", "8999.99", ProductCondition.NEW, true);
+        product("Desk Lamp", "Furniture", "Durban", "80.00", ProductCondition.NEW, true);
+        product("Tutoring", "Tutoring and academic help", "Cape Town", "150.00", ProductCondition.GOOD, true);
+
+        assertThat(service.search(criteria(null, "ELECTRONICS, furniture", null, null, null, null))
+                .getContent()).extracting(Product::getName).containsExactlyInAnyOrder("Laptop", "Desk Lamp");
+    }
+
+    @Test
+    @DisplayName("campus filter matches the seller campus case insensitively")
+    void campus_matchesSellerProfile() {
+        product("Bellville Book", "Books", "Cape Town", "120.00", ProductCondition.GOOD, true);
+
+        assertThat(service.search(criteria(null, null, "cput - bellville"))
+                .getContent()).extracting(Product::getName).containsExactly("Bellville Book");
+        assertThat(service.search(criteria(null, null, "UWC - Bellville")).getTotalElements()).isZero();
+    }
+
     private ProductSearchCriteria criteria(String keyword, String category, String minPrice, String maxPrice,
+                                           ProductCondition condition, Boolean activeOnly) {
+        return criteria(keyword, category, null, minPrice, maxPrice, condition, activeOnly);
+    }
+
+    private ProductSearchCriteria criteria(String keyword, String category, String campus) {
+        return criteria(keyword, category, campus, null, null, null, null);
+    }
+
+    private ProductSearchCriteria criteria(String keyword, String category, String campus,
+                                           String minPrice, String maxPrice,
                                            ProductCondition condition, Boolean activeOnly) {
         return new ProductSearchCriteria(
                 keyword,
                 category,
                 null,
+                campus,
                 minPrice == null ? null : new BigDecimal(minPrice),
                 maxPrice == null ? null : new BigDecimal(maxPrice),
                 condition,

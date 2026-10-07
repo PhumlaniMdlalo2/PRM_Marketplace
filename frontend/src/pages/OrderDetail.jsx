@@ -6,8 +6,12 @@ import StatusBadge from '../components/ui/StatusBadge';
 import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import { cancelOrder, getOrder, listOrderItems } from '../api/orders';
+import {
+  isPaymentSimulationEnabled, listPaymentInstructions, simulatePayment, updatePaymentStatus,
+} from '../api/payments';
 import { useAsync } from '../hooks/useAsync';
 import { formatPrice } from '../lib/format';
+import { startConversation } from '../api/messages';
 
 /**
  * One order in full.
@@ -30,6 +34,22 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-ZA');
 };
 
+const trackingStages = (fulfillmentMethod) => [
+  'PENDING',
+  'CONFIRMED',
+  'SHIPPED',
+  'DELIVERED',
+].map((status) => ({
+  status,
+  label: status === 'PENDING'
+    ? 'Order placed'
+    : status === 'CONFIRMED'
+      ? 'Seller confirmed'
+      : status === 'SHIPPED'
+        ? fulfillmentMethod === 'MEETUP' ? 'Ready for meetup' : 'On the way'
+        : fulfillmentMethod === 'MEETUP' ? 'Collected' : 'Delivered',
+}));
+
 const OrderDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -40,8 +60,38 @@ const OrderDetail = () => {
   const loadItems = useCallback(() => listOrderItems(id), [id]);
   const { data: items, error: itemsError } = useAsync(loadItems);
 
+  const loadPaymentInfo = useCallback(async () => {
+    const [instructions, simulationEnabled] = await Promise.all([
+      listPaymentInstructions(id),
+      isPaymentSimulationEnabled(),
+    ]);
+    return { instructions, simulationEnabled };
+  }, [id]);
+  const {
+    data: paymentInfo,
+    loading: paymentInfoLoading,
+    error: paymentInfoError,
+    run: reloadPaymentInfo,
+  } = useAsync(loadPaymentInfo);
+
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(null);
+  const [paymentAction, setPaymentAction] = useState(null);
+  const [paymentError, setPaymentError] = useState(null);
+
+  const contactSeller = async (sellerUserId) => {
+    if (!sellerUserId || paymentAction) return;
+    setPaymentAction('CONTACT');
+    setPaymentError(null);
+    try {
+      const conversation = await startConversation(sellerUserId);
+      navigate(`/messages/${conversation.id}`);
+    } catch (caught) {
+      setPaymentError(caught.message || 'Could not open a conversation with the seller.');
+    } finally {
+      setPaymentAction(null);
+    }
+  };
 
   const cancel = async () => {
     setCancelError(null);
@@ -57,6 +107,36 @@ const OrderDetail = () => {
         : caught.message);
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const handlePayment = async (paymentId, outcome) => {
+    if (!paymentId || paymentAction) return;
+
+    setPaymentAction(outcome);
+    setPaymentError(null);
+    try {
+      await simulatePayment(paymentId, outcome);
+      await reloadPaymentInfo();
+    } catch (caught) {
+      setPaymentError(caught.message || 'The sandbox result could not be recorded.');
+    } finally {
+      setPaymentAction(null);
+    }
+  };
+
+  const retryPayment = async (paymentId) => {
+    if (!paymentId || paymentAction) return;
+
+    setPaymentAction('RETRY');
+    setPaymentError(null);
+    try {
+      await updatePaymentStatus(paymentId, 'PENDING');
+      await reloadPaymentInfo();
+    } catch (caught) {
+      setPaymentError(caught.message || 'The payment could not be retried.');
+    } finally {
+      setPaymentAction(null);
     }
   };
 
@@ -89,6 +169,11 @@ const OrderDetail = () => {
   }
 
   const canCancel = CANCELLABLE.includes(order.status);
+  const paymentInstructions = paymentInfo?.instructions ?? [];
+  const isMeetup = order.fulfillmentMethod === 'MEETUP';
+  const completedStage = trackingStages(order.fulfillmentMethod).findIndex(
+    (stage) => stage.status === order.status,
+  );
 
   return (
     <Layout>
@@ -115,13 +200,155 @@ const OrderDetail = () => {
           <p className="mt-2 text-2xl font-bold text-text-primary">
             {formatPrice(order.totalAmount)}
           </p>
-          {order.shippingAddress?.singleLine && (
-            <p className="mt-3 text-sm text-text-secondary">
-              <span className="block text-xs font-medium uppercase tracking-wider text-text-muted">
-                Delivering to
-              </span>
-              {order.shippingAddress.singleLine}
+          <p className="mt-2 text-xs text-text-muted">Order reference: {order.id}</p>
+          <p className="mt-3 text-sm font-medium text-text-primary">
+            {isMeetup ? 'Meet the seller' : 'Delivery'}
+          </p>
+          {isMeetup ? (
+            <p className="mt-1 text-sm text-text-secondary">
+              Arrange a safe time and place with each seller through marketplace messages.
             </p>
+          ) : (
+            <>
+              {order.shippingAddress?.singleLine && (
+                <p className="mt-2 text-sm text-text-secondary">
+                  <span className="block text-xs font-medium uppercase tracking-wider text-text-muted">
+                    Delivering to
+                  </span>
+                  {order.shippingAddress.singleLine}
+                </p>
+              )}
+              {order.estimatedDeliveryDate && (
+                <p className="mt-3 text-sm text-text-secondary">
+                  Estimated delivery by{' '}
+                  <time dateTime={order.estimatedDeliveryDate}>
+                    {formatDate(order.estimatedDeliveryDate)}
+                  </time>
+                  . This is an estimate, not live courier tracking.
+                </p>
+              )}
+            </>
+          )}
+        </section>
+
+        <section className="mt-4 rounded-2xl border border-border bg-white p-4" aria-labelledby="tracking-heading">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 id="tracking-heading" className="font-semibold text-text-primary">Order tracking</h2>
+              <p className="mt-1 text-sm text-text-secondary">
+                {order.status === 'CANCELLED' || order.status === 'REFUNDED'
+                  ? `This order is ${order.status.toLowerCase()}.`
+                  : trackingStages(order.fulfillmentMethod)[Math.max(completedStage, 0)].label}
+              </p>
+            </div>
+            <StatusBadge status={order.status} />
+          </div>
+          {order.status !== 'CANCELLED' && order.status !== 'REFUNDED' && (
+            <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Order progress">
+              {trackingStages(order.fulfillmentMethod).map((stage, index) => {
+                const isComplete = index <= completedStage;
+                return (
+                  <li key={stage.status} className="flex items-start gap-2">
+                    <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs ${
+                      isComplete ? 'bg-primary text-white' : 'border border-border text-text-muted'
+                    }`} aria-hidden="true">
+                      {isComplete ? '✓' : index + 1}
+                    </span>
+                    <span className={`text-xs leading-5 ${isComplete ? 'font-medium text-text-primary' : 'text-text-muted'}`}>
+                      {stage.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </section>
+
+        <section className="mt-4 rounded-2xl border border-border bg-white p-4" aria-labelledby="payment-heading">
+          <h2 id="payment-heading" className="font-semibold text-text-primary">Payment</h2>
+          {paymentInfoLoading && !paymentInfo ? (
+            <div className="mt-3 h-12 animate-pulse rounded-xl bg-lavender" role="status">
+              <span className="sr-only">Loading payment status</span>
+            </div>
+          ) : paymentInfoError ? (
+            <p className="mt-2 text-sm text-error" role="alert">
+              Payment status could not be loaded: {paymentInfoError.message}
+            </p>
+          ) : !paymentInstructions.length ? (
+            <p className="mt-2 text-sm text-text-secondary">No payment attempt is recorded for this order.</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {paymentInstructions.map((payment) => (
+                <div key={payment.paymentId} className="rounded-xl border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-text-primary">
+                        {payment.method === 'CASH_ON_PICKUP' ? 'Cash on pickup' : payment.method}
+                        {payment.sellerName ? ` · ${payment.sellerName}` : ''}
+                      </p>
+                      <p className="mt-1 text-sm text-text-secondary">
+                        {payment.status} · {formatPrice(payment.amount)}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Payment reference: {payment.transactionReference}
+                  </p>
+                  {payment.method === 'EFT' && payment.payoutDetails && (
+                    <dl className="mt-3 grid grid-cols-1 gap-1 text-sm text-text-secondary">
+                      <div>Bank: {payment.payoutDetails.bankName}</div>
+                      <div>Account holder: {payment.payoutDetails.accountHolder}</div>
+                      <div>Account number: {payment.payoutDetails.accountNumber}</div>
+                      <div>Branch code: {payment.payoutDetails.branchCode}</div>
+                      <div>Account type: {payment.payoutDetails.accountType}</div>
+                      <div>Use reference: {payment.transactionReference}</div>
+                    </dl>
+                  )}
+                  {payment.method === 'EFT' && payment.status === 'PENDING' && (
+                    <p className="mt-2 text-xs text-text-muted">
+                      Transfer directly to this seller. The seller confirms only after the funds have cleared.
+                    </p>
+                  )}
+                  {payment.method === 'CASH_ON_PICKUP' && payment.status === 'PENDING' && (
+                    <p className="mt-2 text-xs text-text-muted">
+                      Pay this seller in cash when you collect the items. The seller will confirm receipt.
+                    </p>
+                  )}
+                  {payment.sellerUserId && payment.method !== 'SANDBOX' && (
+                    <Button size="sm" variant="secondary" className="mt-3"
+                      onClick={() => contactSeller(payment.sellerUserId)}
+                      disabled={Boolean(paymentAction)}>
+                      {paymentAction === 'CONTACT' ? 'Opening messages…' : 'Message seller'}
+                    </Button>
+                  )}
+                  {paymentInfo.simulationEnabled && payment.method === 'SANDBOX'
+                    && payment.status === 'PENDING' && (
+                      <div className="mt-3 rounded-xl border border-primary/20 bg-primary-muted p-3">
+                        <p className="text-xs text-text-secondary">Test only. No money moves.</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button size="sm" onClick={() => handlePayment(payment.paymentId, 'SUCCESS')}
+                            disabled={Boolean(paymentAction)}>
+                            {paymentAction === 'SUCCESS' ? 'Recording…' : 'Simulate success'}
+                          </Button>
+                          <Button size="sm" variant="secondary"
+                            onClick={() => handlePayment(payment.paymentId, 'FAILURE')}
+                            disabled={Boolean(paymentAction)}>
+                            {paymentAction === 'FAILURE' ? 'Recording…' : 'Simulate failure'}
+                          </Button>
+                        </div>
+                      </div>
+                  )}
+                  {payment.method === 'SANDBOX' && payment.status === 'FAILED'
+                    && paymentInfo.simulationEnabled && (
+                      <Button size="sm" className="mt-3" onClick={() => retryPayment(payment.paymentId)}
+                        disabled={Boolean(paymentAction)}>
+                        {paymentAction === 'RETRY' ? 'Starting retry…' : 'Retry sandbox payment'}
+                      </Button>
+                  )}
+                </div>
+              ))}
+              {paymentError && <p className="text-sm text-error" role="alert">{paymentError}</p>}
+            </div>
           )}
         </section>
 

@@ -19,8 +19,9 @@ import { TOKEN_STORAGE_KEY } from '../api/client'
 
 /** Public routes, with one landmark that proves the right page rendered rather than a blank shell. */
 const PUBLIC_ROUTES = [
-  { path: '/', landmark: () => screen.getAllByRole('tablist') },
-  { path: '/search', landmark: () => screen.findByRole('heading', { name: /search/i }) },
+  { path: '/', landmark: () => screen.findByRole('heading', { name: /a marketplace for campus life/i }) },
+  { path: '/marketplace', landmark: () => screen.getAllByRole('tablist') },
+  { path: '/search', landmark: () => screen.findByRole('heading', { name: /browse goods/i }) },
   { path: '/product/6f1a1f9e-0000-4000-8000-000000000001', landmark: null },
   { path: '/login', landmark: () => screen.findByRole('heading', { name: /welcome back/i }) },
   { path: '/signup', landmark: () => screen.findByRole('heading', { name: /create your account/i }) },
@@ -54,15 +55,15 @@ const PROTECTED_ROUTES = [
   '/listing/edit/9d4d4f9e-0000-4000-8000-000000000001',
   '/listing/mine',
   '/bulletin/create',
+  '/student-groups',
 ]
 
 const USER = { id: '11111111-1111-1111-1111-111111111111', name: 'Test Buyer', role: 'STUDENT', verified: true }
 
 /**
  * `usr` is the key React Router keeps its own location state under, so pushing it here is the only
- * way to arrive at a route the way the app actually navigates to it. `/verification` reads the
- * email it needs from that state and redirects to /signup without it, which is correct behaviour
- * rather than a bug -- see the comment in Verification.jsx.
+ * way to arrive at a route the way the app actually navigates to it. `/verification` uses router
+ * state after signup when available, but also supports direct navigation for account recovery.
  */
 const renderAppAt = (path, routerState = undefined) => {
   window.history.pushState(routerState === undefined ? {} : { usr: routerState }, '', path)

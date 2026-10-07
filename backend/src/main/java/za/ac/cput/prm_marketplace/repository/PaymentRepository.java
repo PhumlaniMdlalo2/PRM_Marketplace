@@ -36,6 +36,14 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
     List<Payment> findByStatus(PaymentStatus status);
 
+    boolean existsByOrderIdAndStatus(UUID orderId, PaymentStatus status);
+
+    boolean existsByOrderId(UUID orderId);
+
+    long countByOrderIdAndStatusNot(UUID orderId, PaymentStatus status);
+
+    List<Payment> findBySellerUserIdOrderByCreatedAtDesc(UUID sellerUserId);
+
     Optional<Payment> findByTransactionReference(String transactionReference);
 
     /** Null when the payment does not exist or belongs to somebody else. */

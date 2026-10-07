@@ -15,8 +15,11 @@ import za.ac.cput.prm_marketplace.domain.BulletinPost;
 import za.ac.cput.prm_marketplace.domain.Comment;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.service.ICommentService;
+import za.ac.cput.prm_marketplace.service.IStudentDiscussionGroupService;
+import za.ac.cput.prm_marketplace.domain.Role;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +49,9 @@ class CommentControllerTest {
     @MockitoBean
     private ICommentService commentService;
 
+    @MockitoBean
+    private IStudentDiscussionGroupService groupService;
+
     private UUID authorId;
     private UUID intruderId;
     private UUID postId;
@@ -55,6 +61,10 @@ class CommentControllerTest {
 
     @BeforeEach
     void setUp() {
+        when(groupService.canReadPost(
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(Role.class))).thenReturn(true);
         authorId = UUID.randomUUID();
         intruderId = UUID.randomUUID();
         postId = UUID.randomUUID();
@@ -78,17 +88,12 @@ class CommentControllerTest {
     void create_takesTheAuthorFromTheToken() throws Exception {
         when(commentService.create(any(), eq(authorId))).thenReturn(comment);
 
-        // The body claims a different author and carries its own id. Neither may be trusted.
-        Comment hostile = new Comment.Builder()
-                .copy(comment)
-                .setId(UUID.randomUUID())
-                .setAuthor(buildUser(intruderId))
-                .build();
-
+        // The post and author are included in the JSON request even though the entity serialiser
+        // intentionally hides them on output.
         mockMvc.perform(post("/api/comments")
                         .with(asStudent(authorId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(hostile)))
+                        .content(commentRequest(intruderId)))
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<Comment> captor = ArgumentCaptor.forClass(Comment.class);
@@ -104,7 +109,7 @@ class CommentControllerTest {
         mockMvc.perform(post("/api/comments")
                         .with(asStudent(authorId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(comment)))
+                        .content(commentRequest(authorId)))
                 .andExpect(status().isBadRequest());
     }
 
@@ -119,6 +124,17 @@ class CommentControllerTest {
 
         mockMvc.perform(get("/comments/post/" + postId).with(asStudent(authorId)))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("group comments are hidden from callers without group access")
+    void getByPost_hidesGroupCommentsWithoutMembership() throws Exception {
+        when(groupService.canReadPost(postId, authorId, Role.STUDENT)).thenReturn(false);
+
+        mockMvc.perform(get("/api/comments/post/" + postId).with(asStudent(authorId)))
+                .andExpect(status().isNotFound());
+
+        verify(commentService, never()).getByPost(postId);
     }
 
     @Test
@@ -168,6 +184,7 @@ class CommentControllerTest {
     @Test
     @DisplayName("updating a comment that is not the caller's returns 404")
     void update_returnsNotFoundForAnotherAuthorsComment() throws Exception {
+        when(commentService.read(commentId)).thenReturn(comment);
         when(commentService.update(any(), eq(authorId))).thenReturn(null);
 
         mockMvc.perform(put("/api/comments/" + commentId)
@@ -182,6 +199,7 @@ class CommentControllerTest {
     @Test
     @DisplayName("updating the caller's own comment succeeds")
     void update_returnsUpdatedComment() throws Exception {
+        when(commentService.read(commentId)).thenReturn(comment);
         when(commentService.update(any(), eq(authorId))).thenReturn(comment);
 
         mockMvc.perform(put("/api/comments/" + commentId)
@@ -195,6 +213,7 @@ class CommentControllerTest {
     @Test
     @DisplayName("deleting a comment that is not the caller's returns 404")
     void delete_returnsNotFoundForAnotherAuthorsComment() throws Exception {
+        when(commentService.read(commentId)).thenReturn(comment);
         when(commentService.delete(commentId, authorId)).thenReturn(false);
 
         mockMvc.perform(delete("/api/comments/" + commentId).with(asStudent(authorId)))
@@ -204,6 +223,7 @@ class CommentControllerTest {
     @Test
     @DisplayName("deleting the caller's own comment succeeds")
     void delete_returnsNoContent() throws Exception {
+        when(commentService.read(commentId)).thenReturn(comment);
         when(commentService.delete(commentId, authorId)).thenReturn(true);
 
         mockMvc.perform(delete("/api/comments/" + commentId).with(asStudent(authorId)))
@@ -213,7 +233,7 @@ class CommentControllerTest {
     @Test
     @DisplayName("comment writes require authentication")
     void writeEndpointsRejectAnonymousCallers() throws Exception {
-        String body = objectMapper.writeValueAsString(comment);
+        String body = commentRequest(authorId);
 
         mockMvc.perform(post("/api/comments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -227,6 +247,13 @@ class CommentControllerTest {
                 .andExpect(status().isUnauthorized());
 
         verify(commentService, never()).delete(any(), any());
+    }
+
+    private String commentRequest(UUID claimedAuthorId) throws Exception {
+        return objectMapper.writeValueAsString(Map.of(
+                "post", Map.of("id", postId),
+                "author", Map.of("id", claimedAuthorId),
+                "body", comment.getBody()));
     }
 
     @Test

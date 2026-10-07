@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.PostLike;
 import za.ac.cput.prm_marketplace.security.CurrentCaller;
 import za.ac.cput.prm_marketplace.service.IPostLikeService;
+import za.ac.cput.prm_marketplace.service.IStudentDiscussionGroupService;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,10 +20,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 public class PostLikeController {
 
     private final IPostLikeService postLikeService;
+    private final IStudentDiscussionGroupService groupService;
 
     @Autowired
-    public PostLikeController(IPostLikeService postLikeService) {
+    public PostLikeController(IPostLikeService postLikeService,
+                              IStudentDiscussionGroupService groupService) {
         this.postLikeService = postLikeService;
+        this.groupService = groupService;
     }
 
     /**
@@ -36,6 +40,9 @@ public class PostLikeController {
         @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
     })
     public ResponseEntity<PostLike> toggle(@PathVariable UUID postId, Authentication authentication) {
+        if (!canRead(postId, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         PostLike result = postLikeService.toggle(postId, CurrentCaller.id(authentication));
         // A null result means the caller's like was removed, which is a 204 rather than an error.
         return result == null
@@ -46,17 +53,30 @@ public class PostLikeController {
     /** Whether the caller liked the post. */
     @GetMapping("/post/{postId}")
     public ResponseEntity<Boolean> hasLiked(@PathVariable UUID postId, Authentication authentication) {
+        if (!canRead(postId, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok(postLikeService.hasLiked(postId, CurrentCaller.id(authentication)));
     }
 
     @GetMapping("/post/{postId}/count")
-    public ResponseEntity<Long> countByPost(@PathVariable UUID postId) {
+    public ResponseEntity<Long> countByPost(@PathVariable UUID postId, Authentication authentication) {
+        if (!canRead(postId, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok(postLikeService.countByPost(postId));
     }
 
     /** The posts the caller has liked. */
     @GetMapping
     public ResponseEntity<List<PostLike>> getByUser(Authentication authentication) {
-        return ResponseEntity.ok(postLikeService.getByUser(CurrentCaller.id(authentication)));
+        return ResponseEntity.ok(postLikeService.getByUser(CurrentCaller.id(authentication)).stream()
+                .filter(like -> like.getPost() != null
+                        && canRead(like.getPost().getId(), authentication))
+                .toList());
+    }
+
+    private boolean canRead(UUID postId, Authentication authentication) {
+        return groupService.canReadPost(postId, CurrentCaller.id(authentication), CurrentCaller.role(authentication));
     }
 }

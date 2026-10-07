@@ -3,6 +3,7 @@ package za.ac.cput.prm_marketplace.domain;
 public enum PaymentMethod {
     CARD,
     EFT,
-    WALLET
+    CASH_ON_PICKUP,
+    WALLET,
+    SANDBOX
 }
-

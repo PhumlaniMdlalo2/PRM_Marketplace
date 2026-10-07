@@ -1,8 +1,10 @@
-# PRM Marketplace frontend
+# Vendra frontend
 
 React 19 + Vite + Tailwind 4 single-page app for the student resale marketplace. It talks to the
 Spring backend through same-origin `/api/...` paths; in development Vite proxies those to
 `VITE_BACKEND_URL` (default `http://localhost:8080`).
+
+The public landing page is `/`; the product catalogue starts at `/marketplace`.
 
 ## Commands
 

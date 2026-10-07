@@ -5,14 +5,15 @@ import Moderation from '../pages/Moderation';
 import { AuthProvider } from '../auth/AuthContext';
 import { TOKEN_STORAGE_KEY } from '../api/client';
 import { listReportsForModeration, resolveReport } from '../api/reports';
+import { listVendorProfiles, setVendorVerification } from '../api/vendorProfile';
 
 /**
- * Reports have always been stored with a `faculty may resolve them` rule behind them and nothing in
+ * Reports have always been stored with a `admin may resolve them` rule behind them and nothing in
  * the app to exercise it: the endpoints existed, the table filled up, and nobody with the role had a
  * screen to work from.
  *
  * What matters here is the split the server makes and how it is presented — a student sees why the
- * page is empty rather than a queue with nothing in it, a faculty account sees every report with its
+ * page is empty rather than a queue with nothing in it, an admin account sees every report with its
  * status, and a decision lands as a status change with the note that goes back to the person who
  * reported it.
  */
@@ -25,7 +26,12 @@ vi.mock('../api/reports', () => ({
   withdrawReport: vi.fn(),
 }));
 
-const FACULTY = { id: 'f-1', name: 'Prof Dlamini', role: 'FACULTY' };
+vi.mock('../api/vendorProfile', () => ({
+  listVendorProfiles: vi.fn(),
+  setVendorVerification: vi.fn(),
+}));
+
+const ADMIN = { id: 'f-1', name: 'Prof Dlamini', role: 'ADMIN' };
 const STUDENT = { id: 's-1', name: 'Themba', role: 'STUDENT' };
 
 const report = (overrides = {}) => ({
@@ -63,8 +69,17 @@ beforeEach(() => {
   localStorage.clear();
   listReportsForModeration.mockReset();
   resolveReport.mockReset();
+  listVendorProfiles.mockReset();
+  setVendorVerification.mockReset();
   listReportsForModeration.mockResolvedValue([]);
   resolveReport.mockResolvedValue(report({ id: 'rep-1', status: 'RESOLVED' }));
+  listVendorProfiles.mockResolvedValue([]);
+  setVendorVerification.mockImplementation(async (id, verified) => ({
+    id,
+    businessName: 'Jane Books',
+    registrationNo: 'REG-1',
+    verified,
+  }));
 });
 
 afterEach(() => {
@@ -72,8 +87,8 @@ afterEach(() => {
 });
 
 describe('Moderation', () => {
-  it('shows a faculty account every report waiting on a decision', async () => {
-    signInAs(FACULTY);
+  it('shows an admin account every report waiting on a decision', async () => {
+    signInAs(ADMIN);
     listReportsForModeration.mockResolvedValue([
       report(),
       report({
@@ -96,8 +111,26 @@ describe('Moderation', () => {
     expect(listReportsForModeration).toHaveBeenCalledTimes(1);
   });
 
+  it('lets admin approve a pending seller application', async () => {
+    signInAs(ADMIN);
+    listVendorProfiles.mockResolvedValue([{
+      id: 'seller-1',
+      businessName: 'Jane Books',
+      registrationNo: 'REG-1',
+      verified: false,
+    }]);
+
+    renderQueue();
+
+    expect(await screen.findByText('Jane Books')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve seller' }));
+
+    await waitFor(() => expect(setVendorVerification).toHaveBeenCalledWith('seller-1', true));
+    expect(await screen.findByText('Approved')).toBeInTheDocument();
+  });
+
   it('filters the queue by status', async () => {
-    signInAs(FACULTY);
+    signInAs(ADMIN);
     listReportsForModeration.mockResolvedValue([
       report(),
       report({ id: 'rep-2', reason: 'Left rubbish at the collection point', status: 'RESOLVED' }),
@@ -114,7 +147,7 @@ describe('Moderation', () => {
   });
 
   it('resolves a report with the note that goes back to the reporter', async () => {
-    signInAs(FACULTY);
+    signInAs(ADMIN);
     listReportsForModeration.mockResolvedValue([report()]);
 
     renderQueue();
@@ -135,7 +168,7 @@ describe('Moderation', () => {
   });
 
   it('says so when the report has left the queue by the time a decision reaches it', async () => {
-    signInAs(FACULTY);
+    signInAs(ADMIN);
     listReportsForModeration.mockResolvedValue([report()]);
     resolveReport.mockRejectedValue({ status: 404, message: '' });
 
@@ -153,12 +186,12 @@ describe('Moderation', () => {
 
     renderQueue();
 
-    expect(await screen.findByText('Moderation is for faculty accounts')).toBeInTheDocument();
+    expect(await screen.findByText('Moderation is for admin accounts')).toBeInTheDocument();
     expect(listReportsForModeration).not.toHaveBeenCalled();
   });
 
   it('reports a failure to load as a failure, not an empty queue', async () => {
-    signInAs(FACULTY);
+    signInAs(ADMIN);
     listReportsForModeration.mockRejectedValue({ status: 500, message: '' });
 
     renderQueue();

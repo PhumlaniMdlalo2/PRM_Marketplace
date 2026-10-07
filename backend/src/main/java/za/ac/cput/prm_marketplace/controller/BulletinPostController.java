@@ -7,6 +7,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
 import za.ac.cput.prm_marketplace.security.CurrentCaller;
+import za.ac.cput.prm_marketplace.service.IStudentDiscussionGroupService;
 import za.ac.cput.prm_marketplace.service.IBulletinPostService;
 
 import java.util.List;
@@ -19,10 +20,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 public class BulletinPostController {
 
     private final IBulletinPostService bulletinPostService;
+    private final IStudentDiscussionGroupService groupService;
 
     @Autowired
-    public BulletinPostController(IBulletinPostService bulletinPostService) {
+    public BulletinPostController(IBulletinPostService bulletinPostService,
+                                  IStudentDiscussionGroupService groupService) {
         this.bulletinPostService = bulletinPostService;
+        this.groupService = groupService;
     }
 
     /**
@@ -51,7 +55,10 @@ public class BulletinPostController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<BulletinPost> read(@PathVariable UUID id) {
+    public ResponseEntity<BulletinPost> read(@PathVariable UUID id, Authentication authentication) {
+        if (!canRead(id, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         BulletinPost post = bulletinPostService.read(id);
         if (post == null) {
             return ResponseEntity.notFound().build();
@@ -64,6 +71,9 @@ public class BulletinPostController {
     public ResponseEntity<BulletinPost> update(@PathVariable UUID id,
                                                @RequestBody BulletinPost bulletinPost,
                                                Authentication authentication) {
+        if (!canRead(id, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         BulletinPost toUpdate = new BulletinPost.Builder().copy(bulletinPost).setId(id).build();
         BulletinPost updated = bulletinPostService.update(toUpdate, CurrentCaller.id(authentication));
         if (updated == null) {
@@ -78,9 +88,18 @@ public class BulletinPostController {
         @ApiResponse(responseCode = "204", description = "Nothing to return: the change was applied and there is no state left to read.")
     })
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication authentication) {
+        if (!canRead(id, authentication)) {
+            return ResponseEntity.notFound().build();
+        }
         if (!bulletinPostService.delete(id, CurrentCaller.id(authentication))) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
+    }
+
+    private boolean canRead(UUID postId, Authentication authentication) {
+        return authentication == null
+                ? groupService.canReadPost(postId, null, null)
+                : groupService.canReadPost(postId, CurrentCaller.id(authentication), CurrentCaller.role(authentication));
     }
 }

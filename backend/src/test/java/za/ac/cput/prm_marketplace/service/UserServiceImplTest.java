@@ -67,7 +67,7 @@ class UserServiceImplTest {
 
     @Test
     void updateProfileReturnsNullWhenIdIsNull() {
-        User result = userService.updateProfile(null, "Jane Doe", null, null);
+        User result = userService.updateProfile(null, "Jane Doe", null, null, null);
 
         assertThat(result).isNull();
         verifyNoInteractions(userRepository);
@@ -78,7 +78,7 @@ class UserServiceImplTest {
         UUID id = UUID.randomUUID();
         when(userRepository.findById(id)).thenReturn(Optional.empty());
 
-        User result = userService.updateProfile(id, "Jane Doe", null, null);
+        User result = userService.updateProfile(id, "Jane Doe", null, null, null);
 
         assertThat(result).isNull();
         verify(userRepository, never()).save(any());
@@ -91,13 +91,43 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userService.updateProfile(id, "Jane Roe", "0722222222", "https://cdn/a.png");
+        User result = userService.updateProfile(id, "Jane Roe", "0722222222", "https://cdn/a.png", null);
 
         assertThat(result).isNotNull();
         assertThat(result.getName()).isEqualTo("Jane Roe");
         assertThat(result.getPhone()).isEqualTo("0722222222");
         assertThat(result.getAvatarUrl()).isEqualTo("https://cdn/a.png");
         assertThat(result.getId()).isEqualTo(id);
+    }
+
+    @Test
+    void updateProfileNormalisesCampusForStudents() {
+        UUID id = UUID.randomUUID();
+        User existing = new User.Builder()
+                .setId(id).setName("Jane").setEmail("jane@example.ac.za")
+                .setPasswordHash("hash").setRole(Role.STUDENT)
+                .build();
+        when(userRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.updateProfile(id, "Jane", null, null, "  Cape Town  ");
+
+        assertThat(result.getCampus()).isEqualTo("Cape Town");
+    }
+
+    @Test
+    void updateProfileDoesNotAllowNonStudentsToChangeCampus() {
+        UUID id = UUID.randomUUID();
+        User existing = new User.Builder()
+                .setId(id).setName("Vendor").setEmail("vendor@example.com")
+                .setPasswordHash("hash").setRole(Role.VENDOR).setCampus("Existing campus")
+                .build();
+        when(userRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.updateProfile(id, "Vendor", null, null, "Another campus");
+
+        assertThat(result.getCampus()).isEqualTo("Existing campus");
     }
 
     /**
@@ -120,7 +150,7 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userService.updateProfile(id, "Renamed", null, null);
+        User result = userService.updateProfile(id, "Renamed", null, null, "Campus");
 
         assertThat(result.getRole()).isEqualTo(Role.VENDOR);
         assertThat(result.getPasswordHash()).isEqualTo("original-hash");
@@ -140,7 +170,7 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userService.updateProfile(id, "Jane", null, null);
+        User result = userService.updateProfile(id, "Jane", null, null, null);
 
         assertThat(result.getPhone()).isNull();
         assertThat(result.getAvatarUrl()).isNull();

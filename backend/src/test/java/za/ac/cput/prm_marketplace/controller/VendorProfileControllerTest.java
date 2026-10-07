@@ -3,6 +3,7 @@ package za.ac.cput.prm_marketplace.controller;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.dto.SellerPayoutDetails;
 import za.ac.cput.prm_marketplace.service.IVendorProfileService;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +28,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
-import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asFaculty;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asAdmin;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
 /**
@@ -275,30 +276,30 @@ class VendorProfileControllerTest {
     // verify
 
     @Test
-    @DisplayName("faculty can grant the badge and the service is given their role")
+    @DisplayName("admin can grant the badge and the service is given their role")
     void verify_grantsTheBadge() throws Exception {
-        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY)))
+        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.ADMIN)))
                 .thenReturn(buildProfile(profileId));
 
         mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
                         .param("verified", "true")
-                        .with(asFaculty(intruderId)))
+                        .with(asAdmin(intruderId)))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @DisplayName("faculty can withdraw the badge")
+    @DisplayName("admin can withdraw the badge")
     void verify_withdrawsTheBadge() throws Exception {
-        when(vendorProfileService.verify(eq(profileId), eq(false), any(), eq(Role.FACULTY)))
+        when(vendorProfileService.verify(eq(profileId), eq(false), any(), eq(Role.ADMIN)))
                 .thenReturn(buildProfile(profileId));
 
         mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
                         .param("verified", "false")
-                        .with(asFaculty(intruderId)))
+                        .with(asAdmin(intruderId)))
                 .andExpect(status().isOk());
 
         // Both directions have to be reachable, or a revoked seller stays marked trusted forever.
-        verify(vendorProfileService).verify(eq(profileId), eq(false), eq(intruderId), eq(Role.FACULTY));
+        verify(vendorProfileService).verify(eq(profileId), eq(false), eq(intruderId), eq(Role.ADMIN));
     }
 
     @Test
@@ -327,14 +328,14 @@ class VendorProfileControllerTest {
         // The decision is a query parameter, not a body field, precisely so that omitting it cannot
         // be mistaken for "withdraw the badge".
         mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
-                        .with(asFaculty(intruderId)))
+                        .with(asAdmin(intruderId)))
                 .andExpect(status().is4xxClientError());
     }
 
     @Test
     @DisplayName("the request body cannot override the verification decision")
     void verify_ignoresAnyBody() throws Exception {
-        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY)))
+        when(vendorProfileService.verify(eq(profileId), eq(true), eq(intruderId), eq(Role.ADMIN)))
                 .thenReturn(buildProfile(profileId));
 
         mockMvc.perform(patch("/api/vendor-profiles/{id}/verification", profileId)
@@ -342,12 +343,12 @@ class VendorProfileControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
                                 new VendorProfile.Builder().setVerified(false).build()))
-                        .with(asFaculty(intruderId)))
+                        .with(asAdmin(intruderId)))
                 .andExpect(status().isOk());
 
         // Only the parameter counts. Keeping the body ignored is what stops "verified" from being a
         // field a caller can smuggle in through some other shape of the request.
-        verify(vendorProfileService).verify(eq(profileId), eq(true), eq(intruderId), eq(Role.FACULTY));
+        verify(vendorProfileService).verify(eq(profileId), eq(true), eq(intruderId), eq(Role.ADMIN));
     }
 
     // getAll
@@ -434,5 +435,47 @@ class VendorProfileControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.verified").value(true))
                 .andExpect(jsonPath("$.ratingAvg").value(4.5));
+    }
+
+    @Test
+    @DisplayName("a seller reads payout details using the owner in their token")
+    void getMyPayoutDetails_usesSellerFromToken() throws Exception {
+        SellerPayoutDetails details =
+                new SellerPayoutDetails("Vendor Owner", "Bank", "12345678", "123456", "CURRENT");
+        when(vendorProfileService.getMyPayoutDetails(sellerId)).thenReturn(details);
+
+        mockMvc.perform(get("/api/vendor-profiles/me/payout-details")
+                        .with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountNumber").value("12345678"));
+
+        verify(vendorProfileService).getMyPayoutDetails(sellerId);
+    }
+
+    @Test
+    @DisplayName("a non-seller cannot access private payout details")
+    void getMyPayoutDetails_refusesCommunityMember() throws Exception {
+        mockMvc.perform(get("/api/vendor-profiles/me/payout-details")
+                        .with(as(intruderId, Role.RESIDENT)))
+                .andExpect(status().isNotFound());
+
+        verifyNoInteractions(vendorProfileService);
+    }
+
+    @Test
+    @DisplayName("payout updates use the seller from the token rather than client identity")
+    void updateMyPayoutDetails_usesSellerFromToken() throws Exception {
+        SellerPayoutDetails details =
+                new SellerPayoutDetails("Vendor Owner", "Bank", "12345678", "123456", "CURRENT");
+        when(vendorProfileService.updateMyPayoutDetails(sellerId, details)).thenReturn(details);
+
+        mockMvc.perform(put("/api/vendor-profiles/me/payout-details")
+                        .with(as(sellerId, Role.VENDOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(details)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountNumber").value("12345678"));
+
+        verify(vendorProfileService).updateMyPayoutDetails(sellerId, details);
     }
 }

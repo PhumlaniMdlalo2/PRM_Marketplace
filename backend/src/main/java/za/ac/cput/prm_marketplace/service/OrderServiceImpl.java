@@ -4,17 +4,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.NotificationType;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderItem;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.FulfillmentMethod;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
+import za.ac.cput.prm_marketplace.exception.ForbiddenException;
 import za.ac.cput.prm_marketplace.repository.AddressRepository;
 import za.ac.cput.prm_marketplace.repository.CartItemRepository;
 import za.ac.cput.prm_marketplace.repository.OrderItemRepository;
@@ -23,10 +29,14 @@ import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -38,8 +48,8 @@ public class OrderServiceImpl implements IOrderService {
     private static final Set<OrderStatus> CANCELLABLE = EnumSet.of(
             OrderStatus.PENDING, OrderStatus.CONFIRMED);
 
-    /** Only these roles may move an order through its lifecycle on the seller's side. */
-    private static final Set<Role> MAY_ADVANCE_ORDER = EnumSet.of(Role.VENDOR, Role.FACULTY);
+    /** These roles may act on an order only when a line item belongs to their seller profile. */
+    private static final Set<Role> MAY_ADVANCE_ORDER = EnumSet.of(Role.STUDENT, Role.VENDOR, Role.ADMIN);
 
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
@@ -49,6 +59,8 @@ public class OrderServiceImpl implements IOrderService {
     private final OrderItemRepository orderItemRepository;
     private final IPaymentService paymentService;
     private final INotificationService notificationService;
+    private final IEmailService emailService;
+    private final String frontendUrl;
 
     public OrderServiceImpl(OrderRepository orderRepository,
                             UserRepository userRepository,
@@ -58,6 +70,21 @@ public class OrderServiceImpl implements IOrderService {
                             OrderItemRepository orderItemRepository,
                             IPaymentService paymentService,
                             INotificationService notificationService) {
+        this(orderRepository, userRepository, productRepository, cartItemRepository, addressRepository,
+                orderItemRepository, paymentService, notificationService, null, "http://localhost:5173");
+    }
+
+    @Autowired
+    public OrderServiceImpl(OrderRepository orderRepository,
+                            UserRepository userRepository,
+                            ProductRepository productRepository,
+                            CartItemRepository cartItemRepository,
+                            AddressRepository addressRepository,
+                            OrderItemRepository orderItemRepository,
+                            IPaymentService paymentService,
+                            INotificationService notificationService,
+                            IEmailService emailService,
+                            @Value("${app.frontend.url:http://localhost:5173}") String frontendUrl) {
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
@@ -66,6 +93,8 @@ public class OrderServiceImpl implements IOrderService {
         this.orderItemRepository = orderItemRepository;
         this.paymentService = paymentService;
         this.notificationService = notificationService;
+        this.emailService = emailService;
+        this.frontendUrl = frontendUrl == null ? "http://localhost:5173" : frontendUrl.replaceAll("/+$", "");
     }
 
     @Override
@@ -95,6 +124,10 @@ public class OrderServiceImpl implements IOrderService {
         // Only the delivery address is buyer-editable. Status, total, buyer and timestamps stay
         // as they are, and the line items are fixed once the order exists.
         Address requested = order.getShippingAddress();
+        if (existing.getFulfillmentMethod() == FulfillmentMethod.DELIVERY && requested == null
+                || existing.getFulfillmentMethod() == FulfillmentMethod.MEETUP && requested != null) {
+            return null;
+        }
         if (requested == null) {
             existing.setShippingAddress(null);
         } else {
@@ -148,6 +181,15 @@ public class OrderServiceImpl implements IOrderService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<Order> getSellerOrders(UUID requesterId, Role role) {
+        if (requesterId == null || (role != Role.STUDENT && role != Role.VENDOR)) {
+            return List.of();
+        }
+        return orderItemRepository.findOrdersByVendorUserId(requesterId);
+    }
+
+    @Override
     public List<Order> getByBuyer(UUID buyerId) {
         if (buyerId == null) {
             return List.of();
@@ -163,10 +205,28 @@ public class OrderServiceImpl implements IOrderService {
         return orderRepository.findByBuyerIdAndStatus(buyerId, status);
     }
 
+    public Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod) {
+        return checkout(buyerId, shippingAddressId, paymentMethod, FulfillmentMethod.MEETUP);
+    }
+
     @Override
     @Transactional
-    public Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod) {
+    public Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod,
+                          FulfillmentMethod fulfillmentMethod) {
         if (buyerId == null) {
+            return null;
+        }
+        FulfillmentMethod selectedFulfillment = fulfillmentMethod == null
+                ? FulfillmentMethod.MEETUP
+                : fulfillmentMethod;
+        PaymentMethod selectedMethod = paymentMethod == null ? PaymentMethod.EFT : paymentMethod;
+        if (selectedMethod != PaymentMethod.EFT
+                && selectedMethod != PaymentMethod.CASH_ON_PICKUP
+                && selectedMethod != PaymentMethod.SANDBOX) {
+            return null;
+        }
+        if (selectedMethod == PaymentMethod.CASH_ON_PICKUP
+                && selectedFulfillment != FulfillmentMethod.MEETUP) {
             return null;
         }
         User buyer = userRepository.findById(buyerId).orElse(null);
@@ -181,8 +241,19 @@ public class OrderServiceImpl implements IOrderService {
             return null;
         }
 
+        for (CartItem cartItem : cartItems) {
+            Product product = cartItem.getProduct();
+            if (product != null && (product.getVendor() == null || !product.getVendor().isVerified())) {
+                throw new ForbiddenException(
+                        "Admin approval is required before this seller can sell marketplace items");
+            }
+        }
+
         Address shippingAddress = null;
-        if (shippingAddressId != null) {
+        if (selectedFulfillment == FulfillmentMethod.DELIVERY) {
+            if (shippingAddressId == null) {
+                return null;
+            }
             shippingAddress = addressRepository.findById(shippingAddressId).orElse(null);
             if (shippingAddress == null
                     || shippingAddress.getUser() == null
@@ -191,12 +262,18 @@ public class OrderServiceImpl implements IOrderService {
                 // not get to have it shipped to them.
                 return null;
             }
+        } else if (shippingAddressId != null) {
+            return null;
         }
 
         Order order = new Order.Builder()
                 .setBuyer(buyer)
                 .setStatus(OrderStatus.PENDING)
                 .setShippingAddress(shippingAddress)
+                .setFulfillmentMethod(selectedFulfillment)
+                .setEstimatedDeliveryDate(selectedFulfillment == FulfillmentMethod.DELIVERY
+                        ? estimateDeliveryDate(LocalDate.now(), 5)
+                        : null)
                 .build();
 
         List<CartItem> purchased = new ArrayList<>();
@@ -240,18 +317,114 @@ public class OrderServiceImpl implements IOrderService {
         //
         // The amount is left null on purpose. IPaymentService resolves a null amount to the order
         // total, so there is no path by which the caller states what they are paying.
-        Payment attempt = new Payment.Builder()
-                .setOrderId(saved.getId())
-                .setMethod(paymentMethod == null ? PaymentMethod.CARD : paymentMethod)
-                .build();
-        if (paymentService.create(attempt, buyerId) == null) {
-            return null;
+        List<String> paymentReferences = new ArrayList<>();
+        if (selectedMethod == PaymentMethod.SANDBOX) {
+            Payment attempt = new Payment.Builder()
+                    .setOrderId(saved.getId())
+                    .setMethod(selectedMethod)
+                    .build();
+            Payment created = paymentService.create(attempt, buyerId);
+            if (created == null) {
+                return null;
+            }
+            if (created.getTransactionReference() != null) {
+                paymentReferences.add(created.getTransactionReference());
+            }
+        } else {
+            Map<UUID, BigDecimal> sellerAmounts = new LinkedHashMap<>();
+            for (OrderItem item : order.getItems()) {
+                if (item.getProduct() == null || item.getProduct().getVendor() == null
+                        || item.getProduct().getVendor().getUser() == null
+                        || item.getProduct().getVendor().getUser().getId() == null) {
+                    return null;
+                }
+                UUID sellerId = item.getProduct().getVendor().getUser().getId();
+                sellerAmounts.merge(sellerId, item.getLineTotal(), BigDecimal::add);
+            }
+            if (sellerAmounts.isEmpty()) {
+                return null;
+            }
+            for (UUID sellerId : sellerAmounts.keySet()) {
+                Payment created = paymentService.createForSeller(saved.getId(), selectedMethod, buyerId, sellerId);
+                if (created == null) {
+                    return null;
+                }
+                if (created.getTransactionReference() != null) {
+                    paymentReferences.add(created.getTransactionReference());
+                }
+            }
         }
 
         // Emptying the cart is scoped to the lines that actually made it into the order.
         cartItemRepository.deleteAll(purchased);
         notifySellersOf(saved);
+        sendConfirmationAfterCommit(saved, paymentReferences);
         return saved;
+    }
+
+    private static LocalDate estimateDeliveryDate(LocalDate from, int businessDays) {
+        LocalDate date = from;
+        int added = 0;
+        while (added < businessDays) {
+            date = date.plusDays(1);
+            if (date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                added++;
+            }
+        }
+        return date;
+    }
+
+    private void sendConfirmationAfterCommit(Order order, List<String> paymentReferences) {
+        if (emailService == null || order.getBuyer() == null || order.getBuyer().getEmail() == null) {
+            return;
+        }
+        String recipient = order.getBuyer().getEmail();
+        String orderReference = order.getId().toString();
+        BigDecimal total = order.getTotalAmount();
+        String method = order.getFulfillmentMethod().name();
+        String address = order.getShippingAddress() == null ? null : order.getShippingAddress().getSingleLine();
+        LocalDate estimatedDeliveryDate = order.getEstimatedDeliveryDate();
+        List<String> references = List.copyOf(paymentReferences);
+        String trackingUrl = frontendUrl + "/orders/" + orderReference;
+        afterCommit(() -> sendEmailSafely(() -> emailService.sendOrderConfirmation(recipient,
+                orderReference, total, method, address, estimatedDeliveryDate, references, trackingUrl),
+                recipient, orderReference));
+    }
+
+    private void sendStatusEmailAfterCommit(Order order) {
+        if (emailService == null || order.getBuyer() == null || order.getBuyer().getEmail() == null) {
+            return;
+        }
+        String recipient = order.getBuyer().getEmail();
+        String orderReference = order.getId().toString();
+        OrderStatus status = order.getStatus();
+        String method = order.getFulfillmentMethod().name();
+        LocalDate estimatedDeliveryDate = order.getEstimatedDeliveryDate();
+        String trackingUrl = frontendUrl + "/orders/" + orderReference;
+        afterCommit(() -> sendEmailSafely(() -> emailService.sendOrderStatusUpdate(recipient,
+                orderReference, status, method, estimatedDeliveryDate, trackingUrl),
+                recipient, orderReference));
+    }
+
+    private void sendEmailSafely(Runnable send, String recipient, String orderReference) {
+        try {
+            send.run();
+        } catch (RuntimeException e) {
+            log.warn("Could not send order email to {} for order {}", recipient, orderReference, e);
+        }
+    }
+
+    private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     /**
@@ -288,7 +461,7 @@ public class OrderServiceImpl implements IOrderService {
     }
 
     /**
-     * Tells the buyer their order moved. Faculty and the seller's vendor account are the only roles
+     * Tells the buyer their order moved. Admin and the seller's vendor account are the only roles
      * that can move it, so the buyer is otherwise the last to know, watching a status change happen
      * to them.
      */
@@ -303,6 +476,7 @@ public class OrderServiceImpl implements IOrderService {
                 : "Order " + order.getStatus().name().toLowerCase();
         notify(buyer.getId(), title, "Your order " + order.getId() + " for " + amount
                 + " is now " + order.getStatus().name().toLowerCase() + ".");
+        sendStatusEmailAfterCommit(order);
     }
 
     /**
@@ -330,6 +504,10 @@ public class OrderServiceImpl implements IOrderService {
         if (!mayActOn(existing, requesterId, role)) {
             return null;
         }
+        if (role != Role.ADMIN && status != OrderStatus.CANCELLED
+                && !paymentService.hasCompletedPayment(existing.getId())) {
+            return null;
+        }
         if (!isLegalTransition(existing.getStatus(), status)) {
             return null;
         }
@@ -340,11 +518,11 @@ public class OrderServiceImpl implements IOrderService {
     }
 
     /**
-     * Faculty supervise every order. A vendor only speaks for the products they sell, so they are
+     * Admins supervise every order. A vendor only speaks for the products they sell, so they are
      * admitted only when one of the order's line items is theirs.
      */
     private boolean mayActOn(Order order, UUID requesterId, Role role) {
-        if (role == Role.FACULTY) {
+        if (role == Role.ADMIN) {
             return true;
         }
         return orderItemRepository.existsByOrderIdAndVendorUserId(order.getId(), requesterId);
@@ -400,7 +578,8 @@ public class OrderServiceImpl implements IOrderService {
             }
         }
         existing.setStatus(OrderStatus.CANCELLED);
-        orderRepository.save(existing);
+        Order saved = orderRepository.save(existing);
+        notifyBuyerOfStatusChange(saved);
         return true;
     }
 

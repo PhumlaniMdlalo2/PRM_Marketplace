@@ -8,28 +8,28 @@
    ============================================================ */
 :root {
   /* Brand */
-  --prm-primary: #4a6cf7;
-  --prm-primary-hover: #3b5cf0;
-  --prm-primary-muted: #eef1fe;
+  --prm-primary: #28634f;
+  --prm-primary-hover: #1d4f3d;
+  --prm-primary-muted: #e9f1ec;
 
   /* Surfaces */
-  --prm-lavender: #f2effb;
-  --prm-lavender-dark: #e7e2f7;
-  --prm-background: #fcfbfe;
+  --prm-lavender: #f0f3ee;
+  --prm-lavender-dark: #e2e9e2;
+  --prm-background: #fafaf7;
 
   /* Text */
-  --prm-foreground: #1a1a2e;
-  --prm-muted-foreground: #5b5b70;
-  --prm-faint-foreground: #8b8ba0;
+  --prm-foreground: #202923;
+  --prm-muted-foreground: #59655d;
+  --prm-faint-foreground: #727e75;
 
   /* Lines */
-  --prm-border: #e7e5ee;
-  --prm-border-strong: #dcd6f0;
+  --prm-border: #e3e7e1;
+  --prm-border-strong: #d4ddd3;
 
   /* Status */
-  --prm-success: #34b37a;
+  --prm-success: #2e7659;
   --prm-warning: #e8a838;
-  --prm-error: #e05b6a;
+  --prm-error: #b84f4f;
 
   /* Fonts */
   --prm-font-sans: 'Sora', system-ui, -apple-system, sans-serif;
@@ -147,6 +147,184 @@
     max-width: 1200px;
     padding: 0 1.5rem;
   }
+
+  .vendra-product {
+    min-width: 0;
+    cursor: pointer;
+    outline-offset: 5px;
+  }
+
+  .vendra-product-image {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 0.92;
+    background: #edf0e9;
+  }
+
+  .vendra-product-photo {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 350ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .vendra-product:hover .vendra-product-photo {
+    transform: scale(1.035);
+  }
+
+  .vendra-product:nth-child(4n + 2) .vendra-product-image {
+    aspect-ratio: 1.12;
+  }
+
+  .vendra-product:nth-child(4n + 3) .vendra-product-image {
+    aspect-ratio: 0.82;
+  }
+
+  .vendra-product-placeholder {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    padding: 1rem;
+    color: var(--prm-muted-foreground);
+    text-align: center;
+    font-size: 0.8rem;
+  }
+
+  .vendra-save {
+    position: absolute;
+    top: 0.65rem;
+    right: 0.65rem;
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border: 1px solid rgb(32 41 35 / 12%);
+    border-radius: 50%;
+    background: rgb(250 250 247 / 94%);
+    transition: transform 180ms ease, background-color 180ms ease;
+  }
+
+  .vendra-save:hover {
+    transform: scale(1.06);
+    background: #fff;
+  }
+
+  .vendra-product-copy {
+    padding-top: 0.75rem;
+  }
+
+  .vendra-product-copy h3 {
+    margin-top: 0.2rem;
+    color: var(--prm-foreground);
+    font-size: 0.91rem;
+    font-weight: 500;
+    line-height: 1.45;
+  }
+
+  .vendra-product-price {
+    color: var(--prm-foreground);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+
+  .vendra-product-location {
+    margin-top: 0.45rem;
+    color: var(--prm-muted-foreground);
+    font-size: 0.76rem;
+  }
+
+  .marketplace-intro {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+    align-items: end;
+    gap: 2rem;
+    margin-top: 1.25rem;
+    padding: clamp(1.5rem, 4vw, 3rem);
+    border-radius: 18px;
+    background: #174b3b;
+    color: #f7f8f3;
+  }
+
+  .marketplace-kicker {
+    margin-bottom: 0.8rem;
+    color: #c6dcca;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+
+  .marketplace-intro h1 {
+    max-width: 13ch;
+    font-size: clamp(2rem, 4vw, 3.5rem);
+    font-weight: 600;
+    letter-spacing: -0.065em;
+    line-height: 1.02;
+    text-wrap: balance;
+  }
+
+  .marketplace-intro > div > p:last-child {
+    margin-top: 0.85rem;
+    color: #d5e1d7;
+    font-size: 0.94rem;
+    line-height: 1.6;
+  }
+
+  .marketplace-search {
+    margin-bottom: 0.15rem;
+  }
+
+  .marketplace-intro .marketplace-search input {
+    min-height: 54px;
+    border: 1px solid rgb(255 255 255 / 18%);
+    background: #fafaf7;
+  }
+
+  .marketplace-intro .marketplace-search input:hover {
+    background: #fff;
+  }
+
+  .marketplace-categories {
+    margin-top: 1.75rem;
+    border-bottom: 1px solid var(--prm-border);
+  }
+
+  .marketplace-categories button {
+    padding-inline: 0.85rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--prm-muted-foreground);
+    box-shadow: none;
+  }
+
+  .marketplace-categories button[aria-pressed="true"] {
+    border-bottom: 2px solid var(--prm-primary);
+    color: var(--prm-primary);
+  }
+
+  .marketplace-categories button:not([aria-pressed="true"]):hover {
+    background: transparent;
+    color: var(--prm-foreground);
+  }
+
+  @media (max-width: 640px) {
+    .marketplace-intro {
+      grid-template-columns: 1fr;
+      gap: 1.2rem;
+      margin-top: 0.5rem;
+      padding: 1.45rem;
+      border-radius: 14px;
+    }
+
+    .marketplace-intro h1 {
+      max-width: 11ch;
+      font-size: 2.55rem;
+    }
+  }
 }
 
 /* Text wrapping utilities */
@@ -159,7 +337,7 @@
 
 /* Focus ring for accessibility */
 :focus-visible {
-  outline: 3px solid rgba(74, 108, 247, 0.4);
+  outline: 3px solid rgba(40, 99, 79, 0.42);
   outline-offset: 2px;
 }
 

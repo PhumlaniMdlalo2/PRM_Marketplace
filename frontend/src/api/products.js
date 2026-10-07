@@ -96,6 +96,10 @@ export const search = async (criteria = {}) => {
   return data;
 };
 
+/** Search several exact, free-text categories with the server's normal filtering and pagination. */
+export const searchAcrossCategories = (categories, criteria = {}) =>
+  search({ ...criteria, category: categories.join(',') });
+
 /**
  * @param {object} product  name, description, price, stockQuantity, category, imageUrl,
  *                           condition, city, province

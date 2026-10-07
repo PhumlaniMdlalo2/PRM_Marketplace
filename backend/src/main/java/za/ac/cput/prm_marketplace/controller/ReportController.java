@@ -70,7 +70,7 @@ public class ReportController {
     }
 
     /**
-     * Moderator view of every report. Faculty only; for anyone else the service returns an empty
+     * Moderator view of every report. Admin only; for anyone else the service returns an empty
      * list rather than the reports.
      */
     @GetMapping("/moderation/all")

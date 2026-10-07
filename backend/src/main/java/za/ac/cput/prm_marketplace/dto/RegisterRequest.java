@@ -20,6 +20,15 @@ public record RegisterRequest(
 
         Role role,
 
-        String phone
+        String phone,
+
+        @Size(max = 120, message = "Business name must be at most 120 characters")
+        String businessName,
+
+        @Size(max = 120, message = "Registration number must be at most 120 characters")
+        String registrationNo
 ) {
+    public RegisterRequest(String name, String email, String password, Role role, String phone) {
+        this(name, email, password, role, phone, null, null);
+    }
 }

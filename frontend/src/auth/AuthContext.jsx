@@ -10,7 +10,15 @@ const USER_STORAGE_KEY = 'prm.user';
 const readStoredUser = () => {
   try {
     const raw = window.localStorage.getItem(USER_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+
+    const user = JSON.parse(raw);
+    if (user?.role === 'FACULTY') {
+      const migratedUser = { ...user, role: 'ADMIN' };
+      persistUser(migratedUser);
+      return migratedUser;
+    }
+    return user;
   } catch {
     return null;
   }

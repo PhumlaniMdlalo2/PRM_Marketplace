@@ -9,6 +9,7 @@ import za.ac.cput.prm_marketplace.domain.RefreshToken;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VerificationCode;
+import za.ac.cput.prm_marketplace.domain.VendorProfile;
 import za.ac.cput.prm_marketplace.dto.AuthResponse;
 import za.ac.cput.prm_marketplace.dto.LoginRequest;
 import za.ac.cput.prm_marketplace.dto.RegisterRequest;
@@ -21,6 +22,7 @@ import za.ac.cput.prm_marketplace.mapper.UserMapper;
 import za.ac.cput.prm_marketplace.repository.PasswordResetTokenRepository;
 import za.ac.cput.prm_marketplace.repository.RefreshTokenRepository;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
+import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 import za.ac.cput.prm_marketplace.repository.VerificationCodeRepository;
 import za.ac.cput.prm_marketplace.security.JwtService;
 
@@ -45,11 +47,12 @@ public class AuthServiceImpl implements IAuthService {
     /** Bytes behind a refresh token. 48 of them become 64 characters of base64url. */
     private static final int REFRESH_TOKEN_BYTES = 48;
 
-    /** Roles an account may pick for itself at signup. Faculty is granted out of band. */
+    /** Roles an account may pick for itself at signup. Admin is granted out of band. */
     private static final Set<Role> SELF_SERVICE_ROLES = EnumSet.of(
             Role.STUDENT, Role.VENDOR, Role.RESIDENT);
 
     private final UserRepository userRepository;
+    private final VendorProfileRepository vendorProfileRepository;
     private final VerificationCodeRepository verificationCodeRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -61,6 +64,7 @@ public class AuthServiceImpl implements IAuthService {
     private final SecureRandom random = new SecureRandom();
 
     public AuthServiceImpl(UserRepository userRepository,
+                           VendorProfileRepository vendorProfileRepository,
                            VerificationCodeRepository verificationCodeRepository,
                            PasswordResetTokenRepository passwordResetTokenRepository,
                            RefreshTokenRepository refreshTokenRepository,
@@ -69,6 +73,7 @@ public class AuthServiceImpl implements IAuthService {
                            IEmailService emailService,
                            @Value("${app.jwt.refresh-expiration-ms:2592000000}") long refreshExpirationMillis) {
         this.userRepository = userRepository;
+        this.vendorProfileRepository = vendorProfileRepository;
         this.verificationCodeRepository = verificationCodeRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -85,6 +90,14 @@ public class AuthServiceImpl implements IAuthService {
             throw new BadRequestException("Registration request is required");
         }
         String email = normalise(request.email());
+        Role role = resolveRegistrationRole(request.role());
+        if (role == Role.STUDENT && !hasApprovedStudentEmailDomain(email)) {
+            throw new BadRequestException("Student email addresses must use an .ac.za or .edu.za domain");
+        }
+        if (role == Role.VENDOR && (request.businessName() == null || request.businessName().isBlank())) {
+            throw new BadRequestException("Business name is required for vendor registration");
+        }
+
         if (userRepository.existsByEmail(email)) {
             throw new ConflictException("An account already exists for " + email);
         }
@@ -93,13 +106,22 @@ public class AuthServiceImpl implements IAuthService {
                 .setName(request.name().trim())
                 .setEmail(email)
                 .setPasswordHash(passwordEncoder.encode(request.password()))
-                .setRole(resolveRegistrationRole(request.role()))
+                .setRole(role)
                 .setPhone(request.phone())
                 .setVerified(false)
                 .build();
 
         User saved = userRepository.save(user);
         userRepository.flush();
+
+        if (role == Role.VENDOR) {
+            vendorProfileRepository.save(new VendorProfile.Builder()
+                    .setUser(saved)
+                    .setBusinessName(request.businessName().trim())
+                    .setRegistrationNo(normaliseOptional(request.registrationNo()))
+                    .setVerified(false)
+                    .build());
+        }
 
         String code = generateCode();
         verificationCodeRepository.save(new VerificationCode.Builder()
@@ -263,15 +285,24 @@ public class AuthServiceImpl implements IAuthService {
      * The role a new account is allowed to sign up with.
      *
      * <p>Previously whatever the request body asked for was granted, so anybody could register as
-     * faculty. That matters here specifically because faculty supervises every order on the
-     * platform, not just their own: a self-registered faculty account is an escalation into other
+     * admin. That matters here specifically because admin supervises every order on the
+     * platform, not just their own: a self-registered admin account is an escalation into other
      * people's orders.
      *
-     * <p>Faculty accounts are granted out of band, so a self-service signup asking for one is
+     * <p>Admin accounts are granted out of band, so a self-service signup asking for one is
      * rejected rather than quietly downgraded. Silently substituting a lesser role would hand the
      * caller a working account whose permissions are not what they asked for, which hides both the
      * attempt and any client bug that caused it.
      */
+    private static boolean hasApprovedStudentEmailDomain(String email) {
+        int separator = email.lastIndexOf('@');
+        if (separator < 0 || separator == email.length() - 1) {
+            return false;
+        }
+        String domain = email.substring(separator + 1);
+        return domain.endsWith(".ac.za") || domain.endsWith(".edu.za");
+    }
+
     private static Role resolveRegistrationRole(Role requested) {
         if (requested == null) {
             return Role.STUDENT;
@@ -281,6 +312,10 @@ public class AuthServiceImpl implements IAuthService {
                     "Role " + requested + " cannot be self-registered");
         }
         return requested;
+    }
+
+    private static String normaliseOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     /**

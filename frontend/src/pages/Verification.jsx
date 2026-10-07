@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Button from '../components/ui/Button';
 import BackButton from '../components/ui/BackButton';
+import Input from '../components/ui/Input';
 import * as authApi from '../api/auth';
 import { useAuth } from '../auth/useAuth';
 
@@ -11,25 +12,18 @@ const Verification = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { verifyAccount } = useAuth();
-  // SignUp hands the address over in router state, so the user is not asked to type an email they
-  // just typed. Arriving without it means they followed a link or refreshed, and there is no code
-  // to verify against, so they are sent back rather than shown a form that cannot succeed.
-  const email = location.state?.email;
+  const [email, setEmail] = useState(location.state?.email ?? '');
 
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [error, setError] = useState('');
-  const [countdown, setCountdown] = useState(RESEND_SECONDS);
+  const [notice, setNotice] = useState('');
+  const [countdown, setCountdown] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
   const inputRefs = useRef([]);
 
-  useEffect(() => {
-    if (!email) navigate('/signup', { replace: true });
-  }, [email, navigate]);
-
-  // The countdown never used to run: canResend started false and nothing started a timer, so the
-  // button stayed disabled forever. Resending is rate-limited server-side by deleting the previous
-  // code, so this timer is the polite half of that — it keeps people from asking for a code that
-  // will be cancelled before they read it.
+  // A successful resend starts a short cooldown, but users arriving here from login or after a
+  // refresh can request the first code immediately.
   useEffect(() => {
     if (countdown <= 0) return undefined;
     const timer = setTimeout(() => setCountdown((seconds) => seconds - 1), 1000);
@@ -37,26 +31,34 @@ const Verification = () => {
   }, [countdown]);
 
   const canResend = countdown <= 0;
-  
+
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const handleEmailChange = (event) => {
+    setEmail(event.target.value);
+    setError('');
+    setNotice('');
+  };
+
   const handleChange = (index, value) => {
     if (value.length > 1) return;
-    
+
     const newCode = [...code];
     newCode[index] = value.replace(/\D/g, '');
     setCode(newCode);
     setError('');
-    
+
     if (value && index < 5) {
       inputRefs.current[index + 1].focus();
     }
   };
-  
+
   const handleKeyDown = (index, e) => {
     if (e.key === 'Backspace' && !code[index] && index > 0) {
       inputRefs.current[index - 1].focus();
     }
   };
-  
+
   const handlePaste = (e) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
@@ -67,8 +69,13 @@ const Verification = () => {
       inputRefs.current[Math.min(pasted.length - 1, 5)].focus();
     }
   };
-  
+
   const handleVerify = async () => {
+    if (!validEmail) {
+      setError('Enter a valid email address');
+      return;
+    }
+
     const verificationCode = code.join('');
     if (verificationCode.length < 6) {
       setError('Please enter all 6 digits');
@@ -77,11 +84,12 @@ const Verification = () => {
 
     setSubmitting(true);
     setError('');
+    setNotice('');
     try {
-      await verifyAccount(email, verificationCode);
+      await verifyAccount(email.trim(), verificationCode);
       // Verifying returns the updated user but not a token, so there is still no session to
       // store. The user logs in with the password they just chose.
-      navigate('/login', { replace: true, state: { email } });
+      navigate('/login', { replace: true, state: { email: email.trim() } });
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -90,15 +98,25 @@ const Verification = () => {
   };
 
   const handleResend = async () => {
-    setCountdown(RESEND_SECONDS);
+    if (!validEmail) {
+      setError('Enter a valid email address');
+      return;
+    }
+
+    setResending(true);
     setError('');
+    setNotice('');
     try {
-      await authApi.resendCode(email);
+      await authApi.resendCode(email.trim());
+      setCountdown(RESEND_SECONDS);
+      setNotice('A new verification code was sent. Check your inbox and spam folder.');
     } catch (caught) {
       setError(caught.message);
+    } finally {
+      setResending(false);
     }
   };
-  
+
   return (
     <div className="min-h-dvh bg-white px-6 py-8">
       <div className="w-full max-w-md mx-auto">
@@ -107,10 +125,22 @@ const Verification = () => {
       <div className="mt-10">
         <h1 className="text-3xl font-bold text-text-primary tracking-tight text-wrap-balance">Almost there</h1>
         <p className="mt-3 text-text-secondary leading-relaxed text-wrap-pretty">
-          We sent a 6-digit code to your email. Enter it below to confirm your account.
+          Enter the 6-digit code sent to your email. If you did not receive one, request a new code.
         </p>
       </div>
-      
+
+      <div className="mt-8">
+        <Input
+          label="Email"
+          type="email"
+          name="email"
+          placeholder="you@university.ac.za"
+          value={email}
+          onChange={handleEmailChange}
+          autoComplete="email"
+        />
+      </div>
+
       <div 
         className="mt-10 flex justify-center gap-2.5" 
         onPaste={handlePaste}
@@ -136,7 +166,10 @@ const Verification = () => {
       {error && (
         <p className="mt-3 text-center text-sm text-error">{error}</p>
       )}
-      
+      {notice && (
+        <p className="mt-3 text-center text-sm text-success" role="status">{notice}</p>
+      )}
+
       <div className="mt-8">
         <Button onClick={handleVerify} size="lg" disabled={submitting}>
           {submitting ? 'Verifying…' : 'Verify'}
@@ -149,10 +182,10 @@ const Verification = () => {
           <button
             type="button"
             onClick={handleResend}
-            disabled={!canResend}
-            className={`font-semibold transition-colors ${canResend ? 'text-primary hover:underline' : 'text-text-muted cursor-not-allowed'}`}
+            disabled={!canResend || resending}
+            className={`font-semibold transition-colors ${canResend && !resending ? 'text-primary hover:underline' : 'text-text-muted cursor-not-allowed'}`}
           >
-            Resend again
+            {resending ? 'Sending…' : 'Resend code'}
           </button>
         </p>
         {!canResend && (

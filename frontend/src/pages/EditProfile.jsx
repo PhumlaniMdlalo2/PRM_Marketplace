@@ -8,6 +8,7 @@ import Avatar from '../components/ui/Avatar';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { updateMe } from '../api/users';
+import { CAMPUSES } from '../lib/campuses';
 
 /**
  * Edits the caller's own profile against `PUT /api/users/me`.
@@ -25,17 +26,24 @@ import { updateMe } from '../api/users';
  */
 const EditProfile = () => {
   const { user, applyUser } = useAuth();
-  const [formData, setFormData] = useState({ name: '', phone: '', avatarUrl: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', avatarUrl: '', campus: '' });
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [customCampus, setCustomCampus] = useState(false);
 
   // Seeded from the session, which is the account as of the last sign-in. An account edited in
   // another tab would show its older values here until the page is revisited; that is the trade for
   // a form that is ready to type into on arrival rather than one that fills in a render later.
   const [seeded, setSeeded] = useState(false);
   if (!seeded && user) {
-    setFormData({ name: user.name ?? '', phone: user.phone ?? '', avatarUrl: user.avatarUrl ?? '' });
+    setFormData({
+      name: user.name ?? '',
+      phone: user.phone ?? '',
+      avatarUrl: user.avatarUrl ?? '',
+      campus: user.campus ?? '',
+    });
+    setCustomCampus(Boolean(user.campus && !CAMPUSES.includes(user.campus)));
     setSeeded(true);
   }
 
@@ -70,6 +78,7 @@ const EditProfile = () => {
         name,
         phone: formData.phone.trim(),
         avatarUrl,
+        campus: formData.campus.trim(),
       });
       // The header, nav and listings all read the name and avatar from the session, so the saved
       // account has to replace the stored copy or the page still shows the old details.
@@ -138,6 +147,45 @@ const EditProfile = () => {
             onChange={handleChange}
             autoComplete="photo"
           />
+
+          {user?.role === 'STUDENT' && (
+            <div>
+              <label htmlFor="profile-campus" className="mb-1.5 block text-sm font-medium text-text-primary">
+                Campus
+              </label>
+              <select
+                id="profile-campus"
+                name="campus"
+                value={customCampus ? 'Other' : formData.campus}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCustomCampus(value === 'Other');
+                  if (value !== 'Other') {
+                    setFormData((current) => ({ ...current, campus: value }));
+                  }
+                  setStatus(null);
+                }}
+                className="w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">Select your campus</option>
+                {CAMPUSES.map((campus) => <option key={campus} value={campus}>{campus}</option>)}
+                <option value="Other">Other campus</option>
+              </select>
+              {customCampus && (
+                <Input
+                  label="Enter your campus"
+                  name="campus"
+                  value={formData.campus}
+                  onChange={handleChange}
+                  maxLength={160}
+                  hint="Students can use campus groups and campus-specific listing filters."
+                />
+              )}
+              <p className="mt-1 text-xs text-text-muted">
+                Optional. Set this to find listings and discussions for your campus.
+              </p>
+            </div>
+          )}
 
           <Input
             label="Email"

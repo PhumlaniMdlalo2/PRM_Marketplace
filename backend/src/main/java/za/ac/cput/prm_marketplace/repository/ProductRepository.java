@@ -25,6 +25,8 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 
     List<Product> findByActiveTrue();
 
+    List<Product> findByActiveTrueAndVendorVerifiedTrue();
+
     List<Product> findByActiveTrueAndCategory(String category);
 
     List<Product> findByNameContainingIgnoreCase(String keyword);
@@ -38,6 +40,10 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     List<Product> findByStockQuantityLessThanEqual(int quantity);
 
     List<Product> findByVendorIdAndActiveTrue(UUID vendorId);
+
+    List<Product> findByVendorIdAndActiveTrueAndVendorVerifiedTrue(UUID vendorId);
+
+    List<Product> findByActiveTrueAndCategoryAndVendorVerifiedTrue(String category);
 
     /**
      * Loads a product only when the given account's vendor profile owns it.
@@ -77,6 +83,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
                set p.stockQuantity = p.stockQuantity - :quantity
              where p.id = :id
                and p.active = true
+               and p.vendor.verified = true
                and p.stockQuantity >= :quantity
             """)
     int decrementStock(@Param("id") UUID id, @Param("quantity") int quantity);

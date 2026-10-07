@@ -1,6 +1,7 @@
 package za.ac.cput.prm_marketplace.domain;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import tools.jackson.databind.annotation.JsonSerialize;
 import jakarta.persistence.*;
@@ -38,6 +39,10 @@ public class BulletinPost {
     @Column(name = "image_url")
     private String imageUrl;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "student_group_id")
+    private StudentDiscussionGroup studentGroup;
+
     @Column(name = "comment_count")
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private int commentCount;
@@ -60,6 +65,7 @@ public class BulletinPost {
         this.body = builder.body;
         this.category = builder.category;
         this.imageUrl = builder.imageUrl;
+        this.studentGroup = builder.studentGroup;
         this.commentCount = builder.commentCount;
         this.likeCount = builder.likeCount;
         this.createdAt = builder.createdAt;
@@ -94,6 +100,16 @@ public class BulletinPost {
 
     public String getImageUrl() {
         return imageUrl;
+    }
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public UUID getStudentGroupId() {
+        return studentGroup == null ? null : studentGroup.getId();
+    }
+
+    @JsonIgnore
+    public StudentDiscussionGroup getStudentGroup() {
+        return studentGroup;
     }
 
     public int getCommentCount() {
@@ -172,6 +188,7 @@ public class BulletinPost {
         private String body;
         private String category;
         private String imageUrl;
+        private StudentDiscussionGroup studentGroup;
         private int commentCount;
         private int likeCount;
         private LocalDateTime createdAt;
@@ -206,6 +223,11 @@ public class BulletinPost {
             return this;
         }
 
+        public Builder setStudentGroup(StudentDiscussionGroup studentGroup) {
+            this.studentGroup = studentGroup;
+            return this;
+        }
+
         public Builder setCommentCount(int commentCount) {
             this.commentCount = commentCount;
             return this;
@@ -228,6 +250,7 @@ public class BulletinPost {
             this.body = bulletinPost.body;
             this.category = bulletinPost.category;
             this.imageUrl = bulletinPost.imageUrl;
+            this.studentGroup = bulletinPost.studentGroup;
             this.commentCount = bulletinPost.commentCount;
             this.likeCount = bulletinPost.likeCount;
             this.createdAt = bulletinPost.createdAt;

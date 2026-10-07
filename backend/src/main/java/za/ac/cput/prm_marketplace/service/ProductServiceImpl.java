@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.Product;
 import za.ac.cput.prm_marketplace.domain.VendorProfile;
 import za.ac.cput.prm_marketplace.dto.ProductSearchCriteria;
+import za.ac.cput.prm_marketplace.exception.ForbiddenException;
 import za.ac.cput.prm_marketplace.factory.ProductFactory;
 import za.ac.cput.prm_marketplace.repository.ProductRepository;
 import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
@@ -62,6 +63,7 @@ public class ProductServiceImpl implements IProductService {
         if (vendor == null) {
             return null;
         }
+        requireApprovedSeller(vendor);
 
         // The factory enforces the rules a listing has to satisfy: a name, a price above zero,
         // a category and non-negative stock. A request that breaks one of them is rejected rather
@@ -97,7 +99,10 @@ public class ProductServiceImpl implements IProductService {
         if (id == null) {
             return null;
         }
-        return productRepository.findById(id).orElse(null);
+        Product product = productRepository.findById(id).orElse(null);
+        return product == null || product.getVendor() == null || !product.getVendor().isVerified()
+                ? null
+                : product;
     }
 
     @Override
@@ -160,6 +165,13 @@ public class ProductServiceImpl implements IProductService {
     @Override
     @Transactional
     public boolean reactivate(UUID id, UUID requesterId) {
+        Product existing = id == null || requesterId == null
+                ? null
+                : productRepository.findByIdAndVendorUserId(id, requesterId).orElse(null);
+        if (existing == null || existing.getVendor() == null) {
+            return false;
+        }
+        requireApprovedSeller(existing.getVendor());
         return setActive(id, requesterId, true);
     }
 
@@ -193,7 +205,7 @@ public class ProductServiceImpl implements IProductService {
     public List<Product> getAll() {
         // Live listings only. Search already filters on active, so leaving this unfiltered meant a
         // retired item vanished from search results but was still sitting in the browse grid.
-        return productRepository.findByActiveTrue();
+        return productRepository.findByActiveTrueAndVendorVerifiedTrue();
     }
 
     @Override
@@ -202,7 +214,7 @@ public class ProductServiceImpl implements IProductService {
         if (vendorId == null) {
             return List.of();
         }
-        return productRepository.findByVendorIdAndActiveTrue(vendorId);
+        return productRepository.findByVendorIdAndActiveTrueAndVendorVerifiedTrue(vendorId);
     }
 
     @Override
@@ -211,7 +223,7 @@ public class ProductServiceImpl implements IProductService {
         if (category == null) {
             return List.of();
         }
-        return productRepository.findByActiveTrueAndCategory(category);
+        return productRepository.findByActiveTrueAndCategoryAndVendorVerifiedTrue(category);
     }
 
     @Override
@@ -263,12 +275,16 @@ public class ProductServiceImpl implements IProductService {
                         cb.like(cb.lower(root.get("description")), pattern, LIKE_ESCAPE)));
             }
             if (criteria.hasCategory()) {
-                predicates.add(cb.equal(cb.lower(root.get("category")),
-                        criteria.category().trim().toLowerCase(Locale.ROOT)));
+                predicates.add(cb.lower(root.get("category")).in(criteria.categoryValues()));
             }
             if (criteria.hasCity()) {
                 predicates.add(cb.equal(cb.lower(root.get("city")),
                         criteria.city().trim().toLowerCase(Locale.ROOT)));
+            }
+            if (criteria.hasCampus()) {
+                predicates.add(cb.equal(
+                        cb.lower(root.get("vendor").get("user").get("campus")),
+                        criteria.campus().trim().toLowerCase(Locale.ROOT)));
             }
             if (criteria.minPrice() != null) {
                 predicates.add(cb.ge(root.get("price"), criteria.minPrice()));
@@ -282,10 +298,17 @@ public class ProductServiceImpl implements IProductService {
             if (Boolean.TRUE.equals(criteria.activeOnly())) {
                 predicates.add(cb.isTrue(root.get("active")));
             }
+            predicates.add(cb.isTrue(root.get("vendor").get("verified")));
 
             return predicates.isEmpty()
                     ? cb.conjunction()
                     : cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    private static void requireApprovedSeller(VendorProfile vendor) {
+        if (!vendor.isVerified()) {
+            throw new ForbiddenException("Admin approval is required before this seller can publish listings");
+        }
     }
 }

@@ -1,8 +1,11 @@
 package za.ac.cput.prm_marketplace.service;
 
 import za.ac.cput.prm_marketplace.domain.Payment;
+import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentSimulationOutcome;
 import za.ac.cput.prm_marketplace.domain.Role;
+import za.ac.cput.prm_marketplace.dto.PaymentInstruction;
 
 import java.util.List;
 import java.util.UUID;
@@ -29,6 +32,8 @@ public interface IPaymentService {
      */
     Payment create(Payment payment, UUID requesterId);
 
+    Payment createForSeller(UUID orderId, PaymentMethod method, UUID buyerId, UUID sellerUserId);
+
     /** The caller's own payment, or null if it does not exist or is somebody else's. */
     Payment read(UUID id, UUID requesterId);
 
@@ -52,17 +57,36 @@ public interface IPaymentService {
      */
     List<Payment> getByOrderId(UUID orderId, UUID requesterId);
 
+    List<PaymentInstruction> getPaymentInstructions(UUID orderId, UUID requesterId);
+
+    List<PaymentInstruction> getSellerPayments(UUID sellerUserId, Role role);
+
+    Payment confirmReceipt(UUID id, UUID sellerUserId, Role role);
+
+    /** Whether the explicit, non-production payment simulator is enabled. */
+    boolean isSimulationEnabled();
+
+    /** True only when the order has at least one payment and every payment is completed. */
+    boolean hasCompletedPayment(UUID orderId);
+
+    /**
+     * Records a buyer-selected simulated outcome for their own pending sandbox payment.
+     * Returns null when simulation is disabled, the payment is not owned by the caller, or is not
+     * a pending sandbox attempt.
+     */
+    Payment simulate(UUID id, PaymentSimulationOutcome outcome, UUID requesterId);
+
     /**
      * Moves one of the caller's own payments through the lifecycle
      * (PENDING -> COMPLETED/FAILED, FAILED -> PENDING, COMPLETED -> REFUNDED) and notifies the payer.
      *
-     * <p>Only FACULTY may settle a payment: everything out of PENDING (COMPLETED, FAILED, REFUNDED)
+     * <p>Only ADMIN may settle a payment: everything out of PENDING (COMPLETED, FAILED, REFUNDED)
      * requires that role, even though the payment is the caller's own. The payer cannot mark their
      * own attempt as paid or as failed. Re-attempting a payment, which is the PENDING move, stays
      * open to everyone because it asserts nothing about money that has moved.
      *
      * <p>Consequence worth being explicit about: with no payment gateway wired up, payments stay at
-     * PENDING and orders do not advance on their own. Faculty settle them by hand until a gateway
+     * PENDING and orders do not advance on their own. Admin settle them by hand until a gateway
      * callback replaces them.
      *
      * <p>Returns null when the payment is missing, is not the caller's, the transition is not

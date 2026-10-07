@@ -23,13 +23,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Faculty is the one role a caller cannot grant themselves, so the only thing standing between an
+ * Admin is the one role a caller cannot grant themselves, so the only thing standing between an
  * anonymous signup and supervision of every order on the platform is that signup being refused.
  * These tests cover the other half: that the role is reachable at all, and reachable only through
  * configuration an operator controls.
  */
 @ExtendWith(MockitoExtension.class)
-class FacultyBootstrapTest {
+class AdminBootstrapTest {
 
     private static final String CONFIGURED = "dean@example.ac.za";
 
@@ -38,11 +38,15 @@ class FacultyBootstrapTest {
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    private FacultyBootstrap bootstrapFor(String configuredEmail) {
-        return new FacultyBootstrap(userRepository, passwordEncoder, configuredEmail);
+    private AdminBootstrap bootstrapFor(String configuredEmail) {
+        return bootstrapFor(configuredEmail, "");
     }
 
-    private void run(FacultyBootstrap bootstrap) {
+    private AdminBootstrap bootstrapFor(String configuredEmail, String configuredPassword) {
+        return new AdminBootstrap(userRepository, passwordEncoder, configuredEmail, configuredPassword);
+    }
+
+    private void run(AdminBootstrap bootstrap) {
         bootstrap.run(null);
     }
 
@@ -66,7 +70,7 @@ class FacultyBootstrapTest {
     @Test
     @DisplayName("whitespace around the address does not stop it matching")
     void whitespaceIsTrimmed() {
-        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(faculty()));
+        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(admin()));
 
         run(bootstrapFor("  Dean@Example.ac.ZA  "));
 
@@ -83,14 +87,29 @@ class FacultyBootstrapTest {
     }
 
     @Test
-    @DisplayName("an account that is already faculty is left alone")
-    void alreadyFaculty_isUntouched() {
-        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(faculty()));
+    @DisplayName("an account that is already admin is left alone when no password is configured")
+    void alreadyAdmin_isUntouched() {
+        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(admin()));
 
         run(bootstrapFor(CONFIGURED));
 
-        // Pointing the variable at a working account repeatedly must be harmless.
+        // Without an explicit password, merely starting the app never changes credentials.
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an existing admin receives an explicitly configured password")
+    void alreadyAdmin_isUpdatedWithConfiguredPassword() {
+        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(admin()));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        run(bootstrapFor(CONFIGURED, "bootstrap-test-passphrase"));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertThat(captor.getValue().getRole()).isEqualTo(Role.ADMIN);
+        assertThat(passwordEncoder.matches("bootstrap-test-passphrase",
+                captor.getValue().getPasswordHash())).isTrue();
     }
 
     @Test
@@ -111,7 +130,7 @@ class FacultyBootstrapTest {
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
-        assertThat(captor.getValue().getRole()).isEqualTo(Role.FACULTY);
+        assertThat(captor.getValue().getRole()).isEqualTo(Role.ADMIN);
         // Promotion must not disturb anything else about the account, least of all its password.
         assertThat(captor.getValue().getPasswordHash()).isEqualTo("hash");
         assertThat(captor.getValue().getId()).isEqualTo(student.getId());
@@ -119,8 +138,31 @@ class FacultyBootstrapTest {
     }
 
     @Test
-    @DisplayName("an unknown address is created as faculty and already verified")
-    void unknownAddress_createsFaculty() {
+    @DisplayName("an existing account gets the configured password when first promoted")
+    void existingAccount_isPromotedWithConfiguredPassword() {
+        User vendor = new User.Builder()
+                .setId(UUID.randomUUID())
+                .setName("Marketplace Admin")
+                .setEmail(CONFIGURED)
+                .setPasswordHash("old-hash")
+                .setRole(Role.VENDOR)
+                .setVerified(true)
+                .build();
+        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.of(vendor));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        run(bootstrapFor(CONFIGURED, "bootstrap-test-passphrase"));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertThat(captor.getValue().getRole()).isEqualTo(Role.ADMIN);
+        assertThat(passwordEncoder.matches("bootstrap-test-passphrase",
+                captor.getValue().getPasswordHash())).isTrue();
+    }
+
+    @Test
+    @DisplayName("an unknown address is created as admin and already verified")
+    void unknownAddress_createsAdmin() {
         when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.empty());
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
@@ -129,10 +171,24 @@ class FacultyBootstrapTest {
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
         User created = captor.getValue();
-        assertThat(created.getRole()).isEqualTo(Role.FACULTY);
+        assertThat(created.getRole()).isEqualTo(Role.ADMIN);
         assertThat(created.getEmail()).isEqualTo(CONFIGURED);
         // Provisioned by an operator, not by someone going through the emailed-code flow.
         assertThat(created.isVerified()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a configured initial password is stored as a password hash")
+    void unknownAddress_usesConfiguredPassword() {
+        when(userRepository.findByEmail(CONFIGURED)).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        run(bootstrapFor(CONFIGURED, "bootstrap-test-passphrase"));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertThat(passwordEncoder.matches("bootstrap-test-passphrase",
+                captor.getValue().getPasswordHash())).isTrue();
     }
 
     @Test
@@ -174,13 +230,13 @@ class FacultyBootstrapTest {
         return captor.getAllValues().get(captor.getAllValues().size() - 1).getPasswordHash();
     }
 
-    private static User faculty() {
+    private static User admin() {
         return new User.Builder()
                 .setId(UUID.randomUUID())
                 .setName("Dean")
                 .setEmail(CONFIGURED)
                 .setPasswordHash("hash")
-                .setRole(Role.FACULTY)
+                .setRole(Role.ADMIN)
                 .setVerified(true)
                 .build();
     }

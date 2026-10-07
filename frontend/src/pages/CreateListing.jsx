@@ -30,7 +30,7 @@ const CreateListing = () => {
   const [uploadError, setUploadError] = useState(null);
 
   const loadSeller = useCallback(() => getMyVendorProfile(), []);
-  const { loading, error: sellerError } = useAsync(loadSeller);
+  const { data: sellerProfile, loading, error: sellerError } = useAsync(loadSeller);
 
   const handleChange = (name, value) => {
     setValues((current) => ({ ...current, [name]: value }));
@@ -74,12 +74,12 @@ const CreateListing = () => {
     }
   };
 
-  // A seller profile is what a listing is published under, and only a VENDOR account may hold one.
-  // So there are two different reasons this form is unavailable, and they need different messages:
-  // a vendor who has not set a profile up yet can fix that in Settings, while any other role cannot
-  // open a storefront at all and should not be sent somewhere that will refuse to help.
-  const needsSellerProfile = sellerError?.status === 404 && user?.role === 'VENDOR';
-  const cannotSell = user?.role && user.role !== 'VENDOR';
+  // Both vendor accounts and students with a seller profile can sell, but neither may publish until
+  // admin approves the profile.
+  const canApplyToSell = user?.role === 'VENDOR' || user?.role === 'STUDENT';
+  const needsSellerProfile = sellerError?.status === 404 && canApplyToSell;
+  const pendingApproval = sellerProfile && !sellerProfile.verified;
+  const cannotSell = user?.role && !canApplyToSell;
 
   return (
     <Layout>
@@ -92,10 +92,10 @@ const CreateListing = () => {
         {cannotSell ? (
           <div className="rounded-2xl bg-lavender p-6 text-center">
             <Store size={28} className="mx-auto mb-3 text-primary" aria-hidden="true" />
-            <h2 className="text-lg font-bold text-text-primary mb-1">Selling is for vendor accounts</h2>
+            <h2 className="text-lg font-bold text-text-primary mb-1">Seller profile needed</h2>
             <p className="text-sm text-text-secondary">
-              This account is signed in as {user.role.toLowerCase()}. Selling on the marketplace
-              needs a vendor account, so there is nothing to set up here.
+              This account is signed in as {user.role.toLowerCase()}. Student and vendor accounts
+              can apply to sell from Settings.
             </p>
           </div>
         ) : needsSellerProfile ? (
@@ -103,10 +103,20 @@ const CreateListing = () => {
             <Store size={28} className="mx-auto mb-3 text-primary" aria-hidden="true" />
             <h2 className="text-lg font-bold text-text-primary mb-1">Seller profile needed</h2>
             <p className="text-sm text-text-secondary mb-4">
-              Items are published under a seller profile, so this account needs one before it can list
-              anything.
+              Apply for a seller profile in Settings. Admin approval is required before listings
+              can be published.
             </p>
-            <Button onClick={() => navigate('/settings')}>Set up a seller profile</Button>
+            <Button onClick={() => navigate('/settings')}>Open seller settings</Button>
+          </div>
+        ) : pendingApproval ? (
+          <div className="rounded-2xl bg-lavender p-6 text-center">
+            <Store size={28} className="mx-auto mb-3 text-primary" aria-hidden="true" />
+            <h2 className="text-lg font-bold text-text-primary mb-1">Seller approval pending</h2>
+            <p className="text-sm text-text-secondary">
+              Admin must approve your seller profile before you can publish listings. You can
+              update your seller details in Settings while you wait.
+            </p>
+            <Button className="mt-4" onClick={() => navigate('/settings')}>Open seller settings</Button>
           </div>
         ) : loading ? (
           // Nothing interactive until the profile answer arrives: an account without one cannot

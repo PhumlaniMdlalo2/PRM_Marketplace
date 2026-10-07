@@ -36,6 +36,9 @@ public record UpdateProfileRequest(
         @Pattern(
                 regexp = "^$|https?://.+",
                 message = "Avatar URL must start with http:// or https://")
-        String avatarUrl
+        String avatarUrl,
+
+        @Size(max = 160, message = "Campus must be at most 160 characters")
+        String campus
 ) {
 }

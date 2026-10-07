@@ -34,7 +34,7 @@ public class UserServiceImpl implements IUserService {
      * promote an account or reset a credential, however it is called.
      */
     @Override
-    public User updateProfile(UUID userId, String name, String phone, String avatarUrl) {
+    public User updateProfile(UUID userId, String name, String phone, String avatarUrl, String campus) {
         User existing = read(userId);
         if (existing == null) {
             return null;
@@ -44,8 +44,18 @@ public class UserServiceImpl implements IUserService {
                 .setName(name)
                 .setPhone(phone)
                 .setAvatarUrl(avatarUrl)
+                .setCampus(existing.getRole() == za.ac.cput.prm_marketplace.domain.Role.STUDENT
+                        ? normaliseCampus(campus)
+                        : existing.getCampus())
                 .build();
         return userRepository.save(updated);
+    }
+
+    private static String normaliseCampus(String campus) {
+        if (campus == null || campus.isBlank()) {
+            return null;
+        }
+        return campus.trim();
     }
 
     @Override

@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.FulfillmentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -27,6 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -119,7 +121,7 @@ class OrderControllerTest {
     @Test
     @DisplayName("create checks out the caller's cart and returns 201")
     void create_returnsCreated() throws Exception {
-        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any(), any(), nullable(FulfillmentMethod.class))).thenReturn(order);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isCreated())
@@ -129,18 +131,18 @@ class OrderControllerTest {
     @Test
     @DisplayName("create takes the buyer from the token, not from the request")
     void create_usesCallerFromToken() throws Exception {
-        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any(), any(), nullable(FulfillmentMethod.class))).thenReturn(order);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isCreated());
 
-        verify(orderService).checkout(eq(buyerId), any(), any());
+        verify(orderService).checkout(eq(buyerId), any(), any(), nullable(FulfillmentMethod.class));
     }
 
     @Test
     @DisplayName("create returns 400 when the service refuses")
     void create_returnsBadRequest() throws Exception {
-        when(orderService.checkout(eq(buyerId), any(), any())).thenReturn(null);
+        when(orderService.checkout(eq(buyerId), any(), any(), nullable(FulfillmentMethod.class))).thenReturn(null);
 
         mockMvc.perform(post("/api/orders").with(asCaller()))
                 .andExpect(status().isBadRequest());
@@ -150,25 +152,27 @@ class OrderControllerTest {
     @DisplayName("checkout returns 201")
     void checkout_returnsCreated() throws Exception {
         UUID addressId = UUID.randomUUID();
-        when(orderService.checkout(buyerId, addressId, null)).thenReturn(order);
+        when(orderService.checkout(buyerId, addressId, null, null)).thenReturn(order);
 
         mockMvc.perform(post("/api/orders/checkout").param("shippingAddressId", addressId.toString()).with(asCaller()))
                 .andExpect(status().isCreated());
 
-verify(orderService).checkout(buyerId, addressId, null);
+verify(orderService).checkout(buyerId, addressId, null, null);
     }
 
     @Test
     @DisplayName("checkout forwards the chosen payment method")
     void checkout_forwardsPaymentMethod() throws Exception {
-        when(orderService.checkout(eq(buyerId), any(), eq(PaymentMethod.EFT))).thenReturn(order);
+        when(orderService.checkout(eq(buyerId), any(), eq(PaymentMethod.EFT),
+                nullable(FulfillmentMethod.class))).thenReturn(order);
 
         mockMvc.perform(post("/api/orders/checkout")
                         .param("paymentMethod", "EFT")
                         .with(asCaller()))
                 .andExpect(status().isCreated());
 
-        verify(orderService).checkout(eq(buyerId), any(), eq(PaymentMethod.EFT));
+        verify(orderService).checkout(eq(buyerId), any(), eq(PaymentMethod.EFT),
+                nullable(FulfillmentMethod.class));
     }
 
     @Test
@@ -179,18 +183,35 @@ verify(orderService).checkout(buyerId, addressId, null);
                         .with(asCaller()))
                 .andExpect(status().isBadRequest());
 
-        verify(orderService, never()).checkout(any(), any(), any());
+        verify(orderService, never()).checkout(any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("checkout leaves the method unset when the caller names none")
     void checkout_passesNullWhenNoMethodGiven() throws Exception {
-        when(orderService.checkout(buyerId, null, null)).thenReturn(order);
+        when(orderService.checkout(buyerId, null, null, null)).thenReturn(order);
 
         mockMvc.perform(post("/api/orders/checkout").with(asCaller()))
                 .andExpect(status().isCreated());
 
-        verify(orderService).checkout(buyerId, null, null);
+        verify(orderService).checkout(buyerId, null, null, null);
+    }
+
+    @Test
+    @DisplayName("checkout forwards the selected fulfillment method")
+    void checkout_forwardsFulfillmentMethod() throws Exception {
+        when(orderService.checkout(eq(buyerId), any(), eq(PaymentMethod.EFT),
+                eq(FulfillmentMethod.DELIVERY))).thenReturn(order);
+
+        mockMvc.perform(post("/api/orders/checkout")
+                        .param("paymentMethod", "EFT")
+                        .param("fulfillmentMethod", "DELIVERY")
+                        .param("shippingAddressId", UUID.randomUUID().toString())
+                        .with(asCaller()))
+                .andExpect(status().isCreated());
+
+        verify(orderService).checkout(eq(buyerId), any(), eq(PaymentMethod.EFT),
+                eq(FulfillmentMethod.DELIVERY));
     }
 
     @Test
@@ -211,6 +232,19 @@ verify(orderService).checkout(buyerId, addressId, null);
 
         mockMvc.perform(get("/api/orders/{id}", id).with(asCaller()))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("seller order list is scoped to the authenticated seller")
+    void sellerOrders_usesCallerIdentityAndRole() throws Exception {
+        actAs(intruderId, Role.VENDOR);
+        when(orderService.getSellerOrders(intruderId, Role.VENDOR)).thenReturn(List.of(order));
+
+        mockMvc.perform(get("/api/orders/seller").with(asCaller()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id.toString()));
+
+        verify(orderService).getSellerOrders(intruderId, Role.VENDOR);
     }
 
     @Test

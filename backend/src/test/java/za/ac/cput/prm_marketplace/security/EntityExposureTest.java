@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  *
  * <ul>
  *   <li>A request body must not be able to set fields the server owns, otherwise anyone can
- *       promote themselves to a faculty account or mark themselves verified by posting JSON.</li>
+ *       promote themselves to an admin account or mark themselves verified by posting JSON.</li>
  *   <li>A response must not serialise a lazy association. {@code spring.jpa.open-in-view} is
  *       false, so the persistence context is closed by the time Jackson runs; touching a lazy
  *       collection then throws and the endpoint answers 500.</li>
@@ -61,7 +61,7 @@ class EntityExposureTest {
     @DisplayName("a request body cannot grant itself a role")
     void requestBody_cannotSetRole() {
         User bound = objectMapper.readValue(
-                "{\"name\":\"Jane\",\"email\":\"j@example.com\",\"role\":\"FACULTY\"}", User.class);
+                "{\"name\":\"Jane\",\"email\":\"j@example.com\",\"role\":\"ADMIN\"}", User.class);
 
         assertThat(bound.getRole())
                 .as("role is assigned by the registration flow, never by the request body")

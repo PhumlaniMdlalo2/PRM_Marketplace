@@ -40,12 +40,16 @@ public class Payment {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private UUID userId;
 
+    @Column(name = "seller_user_id")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private UUID sellerUserId;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private PaymentMethod method; // enum: CARD, EFT, WALLET
+    private PaymentMethod method;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -71,6 +75,7 @@ public class Payment {
         this.id = builder.id;
         this.orderId = builder.orderId;
         this.userId = builder.userId;
+        this.sellerUserId = builder.sellerUserId;
         this.amount = builder.amount;
         this.method = builder.method;
         this.status = builder.status;
@@ -89,6 +94,10 @@ public class Payment {
 
     public UUID getUserId() {
         return userId;
+    }
+
+    public UUID getSellerUserId() {
+        return sellerUserId;
     }
 
     public BigDecimal getAmount() {
@@ -135,6 +144,7 @@ public class Payment {
         private UUID id;
         private UUID orderId;
         private UUID userId;
+        private UUID sellerUserId;
         private BigDecimal amount;
         private PaymentMethod method;
         private PaymentStatus status;
@@ -154,6 +164,11 @@ public class Payment {
 
         public Builder setUserId(UUID userId) {
             this.userId = userId;
+            return this;
+        }
+
+        public Builder setSellerUserId(UUID sellerUserId) {
+            this.sellerUserId = sellerUserId;
             return this;
         }
 
@@ -191,6 +206,7 @@ public class Payment {
             this.id = payment.id;
             this.orderId = payment.orderId;
             this.userId = payment.userId;
+            this.sellerUserId = payment.sellerUserId;
             this.amount = payment.amount;
             this.method = payment.method;
             this.status = payment.status;
@@ -205,4 +221,3 @@ public class Payment {
         }
     }
 }
-

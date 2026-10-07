@@ -78,6 +78,50 @@
         }
       }
     },
+    "/api/vendor-profiles/me/payout-details" : {
+      "get" : {
+        "tags" : [ "vendor-profile-controller" ],
+        "operationId" : "getMyPayoutDetails",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SellerPayoutDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "vendor-profile-controller" ],
+        "operationId" : "updateMyPayoutDetails",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SellerPayoutDetails"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SellerPayoutDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/users/me" : {
       "get" : {
         "tags" : [ "user-controller" ],
@@ -834,6 +878,156 @@
         }
       }
     },
+    "/api/student-groups" : {
+      "get" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/StudentDiscussionGroupResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "create_2",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StudentDiscussionGroupRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/student-groups/{groupId}/posts" : {
+      "get" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "posts",
+        "parameters" : [ {
+          "name" : "groupId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/BulletinPost"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "createPost",
+        "parameters" : [ {
+          "name" : "groupId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BulletinPost"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BulletinPost"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/student-groups/{groupId}/membership" : {
+      "post" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "join",
+        "parameters" : [ {
+          "name" : "groupId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "student-discussion-group-controller" ],
+        "operationId" : "leave",
+        "parameters" : [ {
+          "name" : "groupId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        }
+      }
+    },
     "/api/saved-items/product/{productId}/toggle" : {
       "post" : {
         "tags" : [ "saved-item-controller" ],
@@ -893,7 +1087,7 @@
       },
       "post" : {
         "tags" : [ "report-controller" ],
-        "operationId" : "create_2",
+        "operationId" : "create_3",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -940,7 +1134,7 @@
       },
       "post" : {
         "tags" : [ "product-controller" ],
-        "operationId" : "create_3",
+        "operationId" : "create_4",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1036,7 +1230,7 @@
       },
       "post" : {
         "tags" : [ "product-image-controller" ],
-        "operationId" : "create_4",
+        "operationId" : "create_5",
         "parameters" : [ {
           "name" : "productId",
           "in" : "path",
@@ -1147,7 +1341,7 @@
       },
       "post" : {
         "tags" : [ "payment-controller" ],
-        "operationId" : "create_5",
+        "operationId" : "create_6",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1158,6 +1352,68 @@
           },
           "required" : true
         },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Payment"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/{id}/simulate" : {
+      "post" : {
+        "tags" : [ "payment-controller" ],
+        "operationId" : "simulate",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "outcome",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "SUCCESS", "FAILURE" ]
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Payment"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/{id}/confirm-receipt" : {
+      "post" : {
+        "tags" : [ "payment-controller" ],
+        "operationId" : "confirmReceipt",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1194,7 +1450,7 @@
       },
       "post" : {
         "tags" : [ "order-controller" ],
-        "operationId" : "create_6",
+        "operationId" : "create_7",
         "parameters" : [ {
           "name" : "shippingAddressId",
           "in" : "query",
@@ -1209,7 +1465,15 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "CARD", "EFT", "WALLET" ]
+            "enum" : [ "CARD", "EFT", "CASH_ON_PICKUP", "WALLET", "SANDBOX" ]
+          }
+        }, {
+          "name" : "fulfillmentMethod",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "DELIVERY", "MEETUP" ]
           }
         } ],
         "responses" : {
@@ -1244,7 +1508,15 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "CARD", "EFT", "WALLET" ]
+            "enum" : [ "CARD", "EFT", "CASH_ON_PICKUP", "WALLET", "SANDBOX" ]
+          }
+        }, {
+          "name" : "fulfillmentMethod",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "DELIVERY", "MEETUP" ]
           }
         } ],
         "responses" : {
@@ -1336,7 +1608,7 @@
     "/api/comments" : {
       "post" : {
         "tags" : [ "comment-controller" ],
-        "operationId" : "create_7",
+        "operationId" : "create_8",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1446,7 +1718,7 @@
       },
       "post" : {
         "tags" : [ "bulletin-post-controller" ],
-        "operationId" : "create_8",
+        "operationId" : "create_9",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1734,7 +2006,7 @@
       },
       "post" : {
         "tags" : [ "address-controller" ],
-        "operationId" : "create_9",
+        "operationId" : "create_10",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -2481,6 +2753,13 @@
             "type" : "string"
           }
         }, {
+          "name" : "campus",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "minPrice",
           "in" : "query",
           "required" : false,
@@ -2712,6 +2991,45 @@
         }
       }
     },
+    "/api/payments/simulation" : {
+      "get" : {
+        "tags" : [ "payment-controller" ],
+        "operationId" : "simulationEnabled",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/seller" : {
+      "get" : {
+        "tags" : [ "payment-controller" ],
+        "operationId" : "getSellerPayments",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PaymentInstruction"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/payments/order/{orderId}" : {
       "get" : {
         "tags" : [ "payment-controller" ],
@@ -2734,6 +3052,57 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/Payment"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/order/{orderId}/instructions" : {
+      "get" : {
+        "tags" : [ "payment-controller" ],
+        "operationId" : "getPaymentInstructions",
+        "parameters" : [ {
+          "name" : "orderId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PaymentInstruction"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/seller" : {
+      "get" : {
+        "tags" : [ "order-controller" ],
+        "operationId" : "getSellerOrders",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/Order"
                   }
                 }
               }
@@ -3454,6 +3823,26 @@
           }
         }
       },
+      "SellerPayoutDetails" : {
+        "type" : "object",
+        "properties" : {
+          "accountHolder" : {
+            "type" : "string"
+          },
+          "bankName" : {
+            "type" : "string"
+          },
+          "accountNumber" : {
+            "type" : "string"
+          },
+          "branchCode" : {
+            "type" : "string"
+          },
+          "accountType" : {
+            "type" : "string"
+          }
+        }
+      },
       "UpdateProfileRequest" : {
         "type" : "object",
         "properties" : {
@@ -3472,6 +3861,11 @@
             "maxLength" : 2048,
             "minLength" : 0,
             "pattern" : "^$|https?://.+"
+          },
+          "campus" : {
+            "type" : "string",
+            "maxLength" : 160,
+            "minLength" : 0
           }
         },
         "required" : [ "name" ]
@@ -3491,7 +3885,10 @@
           },
           "role" : {
             "type" : "string",
-            "enum" : [ "STUDENT", "FACULTY", "VENDOR", "RESIDENT" ]
+            "enum" : [ "STUDENT", "ADMIN", "VENDOR", "RESIDENT" ]
+          },
+          "campus" : {
+            "type" : "string"
           },
           "phone" : {
             "type" : "string"
@@ -3633,12 +4030,17 @@
             "format" : "uuid",
             "readOnly" : true
           },
+          "sellerUserId" : {
+            "type" : "string",
+            "format" : "uuid",
+            "readOnly" : true
+          },
           "amount" : {
             "type" : "number"
           },
           "method" : {
             "type" : "string",
-            "enum" : [ "CARD", "EFT", "WALLET" ]
+            "enum" : [ "CARD", "EFT", "CASH_ON_PICKUP", "WALLET", "SANDBOX" ]
           },
           "status" : {
             "type" : "string",
@@ -3739,6 +4141,16 @@
           "shippingAddress" : {
             "$ref" : "#/components/schemas/Address"
           },
+          "fulfillmentMethod" : {
+            "type" : "string",
+            "enum" : [ "DELIVERY", "MEETUP" ],
+            "readOnly" : true
+          },
+          "estimatedDeliveryDate" : {
+            "type" : "string",
+            "format" : "date",
+            "readOnly" : true
+          },
           "createdAt" : {
             "type" : "string",
             "format" : "date-time",
@@ -3787,6 +4199,11 @@
           "createdAt" : {
             "type" : "string",
             "format" : "date-time",
+            "readOnly" : true
+          },
+          "studentGroupId" : {
+            "type" : "string",
+            "format" : "uuid",
             "readOnly" : true
           }
         }
@@ -3860,6 +4277,22 @@
             "type" : "string"
           }
         }
+      },
+      "StudentDiscussionGroupRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 500,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "description", "name" ]
       },
       "SavedItem" : {
         "type" : "object",
@@ -4080,10 +4513,20 @@
           },
           "role" : {
             "type" : "string",
-            "enum" : [ "STUDENT", "FACULTY", "VENDOR", "RESIDENT" ]
+            "enum" : [ "STUDENT", "ADMIN", "VENDOR", "RESIDENT" ]
           },
           "phone" : {
             "type" : "string"
+          },
+          "businessName" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
+          },
+          "registrationNo" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
           }
         },
         "required" : [ "email", "name", "password" ]
@@ -4192,6 +4635,35 @@
           }
         }
       },
+      "StudentDiscussionGroupResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "campus" : {
+            "type" : "string"
+          },
+          "memberCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "joined" : {
+            "type" : "boolean"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "PageResponseProduct" : {
         "type" : "object",
         "properties" : {
@@ -4222,6 +4694,43 @@
           },
           "last" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "PaymentInstruction" : {
+        "type" : "object",
+        "properties" : {
+          "paymentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "orderId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sellerUserId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sellerName" : {
+            "type" : "string"
+          },
+          "amount" : {
+            "type" : "number"
+          },
+          "method" : {
+            "type" : "string",
+            "enum" : [ "CARD", "EFT", "CASH_ON_PICKUP", "WALLET", "SANDBOX" ]
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "COMPLETED", "FAILED", "REFUNDED" ]
+          },
+          "transactionReference" : {
+            "type" : "string"
+          },
+          "payoutDetails" : {
+            "$ref" : "#/components/schemas/SellerPayoutDetails"
           }
         }
       },

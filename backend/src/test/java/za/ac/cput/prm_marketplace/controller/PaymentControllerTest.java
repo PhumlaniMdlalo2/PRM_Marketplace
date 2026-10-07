@@ -14,7 +14,10 @@ import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.Payment;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentStatus;
+import za.ac.cput.prm_marketplace.domain.PaymentSimulationOutcome;
 import za.ac.cput.prm_marketplace.domain.Role;
+import za.ac.cput.prm_marketplace.dto.PaymentInstruction;
+import za.ac.cput.prm_marketplace.dto.SellerPayoutDetails;
 import za.ac.cput.prm_marketplace.service.IPaymentService;
 
 import java.math.BigDecimal;
@@ -33,9 +36,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.as;
-import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asFaculty;
+import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asAdmin;
 import static za.ac.cput.prm_marketplace.support.AuthenticatedRequests.asStudent;
 
 /**
@@ -250,13 +254,50 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("faculty can complete a payment")
+    @DisplayName("the caller can query whether sandbox simulation is enabled")
+    void simulationEnabled_returnsFeatureSetting() throws Exception {
+        when(paymentService.isSimulationEnabled()).thenReturn(true);
+
+        mockMvc.perform(get("/api/payments/simulation").with(asStudent(payerId)))
+                .andExpect(status().isOk())
+                .andExpect(content().string("true"));
+    }
+
+    @Test
+    @DisplayName("a caller may explicitly simulate an outcome for their own payment")
+    void simulate_forwardsOwnerAndOutcome() throws Exception {
+        Payment completed = buildPayment(PaymentStatus.COMPLETED, payerId);
+        when(paymentService.simulate(paymentId, PaymentSimulationOutcome.SUCCESS, payerId))
+                .thenReturn(completed);
+
+        mockMvc.perform(post("/api/payments/{id}/simulate", paymentId)
+                        .with(asStudent(payerId))
+                        .param("outcome", "SUCCESS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+        verify(paymentService).simulate(paymentId, PaymentSimulationOutcome.SUCCESS, payerId);
+    }
+
+    @Test
+    @DisplayName("simulation refusal is not found")
+    void simulate_refused_returnsNotFound() throws Exception {
+        when(paymentService.simulate(paymentId, PaymentSimulationOutcome.SUCCESS, payerId)).thenReturn(null);
+
+        mockMvc.perform(post("/api/payments/{id}/simulate", paymentId)
+                        .with(asStudent(payerId))
+                        .param("outcome", "SUCCESS"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("admin can complete a payment")
     void updateStatus_validTransition_returnsOk() throws Exception {
         when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
-                eq(payerId), eq(Role.FACULTY))).thenReturn(buildPayment(PaymentStatus.COMPLETED, payerId));
+                eq(payerId), eq(Role.ADMIN))).thenReturn(buildPayment(PaymentStatus.COMPLETED, payerId));
 
         mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
-                        .with(asFaculty(payerId))
+                        .with(asAdmin(payerId))
                         .param("status", "COMPLETED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("COMPLETED"));
@@ -266,7 +307,7 @@ class PaymentControllerTest {
     @DisplayName("a payer asking to settle their own payment is not found")
     void updateStatus_payerCannotSettle_returnsNotFound() throws Exception {
         // The role the controller hands the service is the token's, so a student cannot claim
-        // faculty authority by putting anything in the request.
+        // admin authority by putting anything in the request.
         when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
                 eq(payerId), eq(Role.STUDENT))).thenReturn(null);
 
@@ -286,7 +327,7 @@ class PaymentControllerTest {
         mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
                         .with(asStudent(payerId))
                         .param("status", "COMPLETED")
-                        .param("role", "FACULTY"))
+                        .param("role", "ADMIN"))
                 .andExpect(status().isNotFound());
 
         verify(paymentService).updateStatus(eq(paymentId), eq(PaymentStatus.COMPLETED),
@@ -318,14 +359,14 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("faculty may refund")
-    void updateStatus_facultyMayRefund() throws Exception {
+    @DisplayName("admin may refund")
+    void updateStatus_adminMayRefund() throws Exception {
         Payment refunded = buildPayment(PaymentStatus.REFUNDED, payerId);
         when(paymentService.updateStatus(eq(paymentId), eq(PaymentStatus.REFUNDED),
-                eq(payerId), eq(Role.FACULTY))).thenReturn(refunded);
+                eq(payerId), eq(Role.ADMIN))).thenReturn(refunded);
 
         mockMvc.perform(patch("/api/payments/{id}/status", paymentId)
-                        .with(as(payerId, Role.FACULTY))
+                        .with(as(payerId, Role.ADMIN))
                         .param("status", "REFUNDED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("REFUNDED"));
@@ -402,5 +443,50 @@ class PaymentControllerTest {
         assertThat(submitted.getStatus()).isNull();
         assertThat(submitted.getTransactionReference()).isNull();
         assertThat(submitted.getCreatedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("the buyer receives payment instructions only for their own order")
+    void getPaymentInstructions_usesBuyerFromToken() throws Exception {
+        PaymentInstruction instruction = new PaymentInstruction(paymentId, orderId, intruderId,
+                "Seller", new BigDecimal("780.00"), PaymentMethod.EFT, PaymentStatus.PENDING,
+                "PAY-TEST00000001",
+                new SellerPayoutDetails("Seller", "Bank", "12345678", "123456", "CURRENT"));
+        when(paymentService.getPaymentInstructions(orderId, payerId)).thenReturn(List.of(instruction));
+
+        mockMvc.perform(get("/api/payments/order/{orderId}/instructions", orderId)
+                        .with(asStudent(payerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].payoutDetails.accountNumber").value("12345678"));
+
+        verify(paymentService).getPaymentInstructions(orderId, payerId);
+    }
+
+    @Test
+    @DisplayName("seller payment listing uses the authenticated seller and role")
+    void getSellerPayments_usesSellerFromToken() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        when(paymentService.getSellerPayments(sellerId, Role.VENDOR)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/payments/seller").with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        verify(paymentService).getSellerPayments(sellerId, Role.VENDOR);
+    }
+
+    @Test
+    @DisplayName("receipt confirmation is scoped to the authenticated seller")
+    void confirmReceipt_usesSellerFromToken() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        Payment completed = buildPayment(PaymentStatus.COMPLETED, payerId);
+        when(paymentService.confirmReceipt(paymentId, sellerId, Role.VENDOR)).thenReturn(completed);
+
+        mockMvc.perform(post("/api/payments/{id}/confirm-receipt", paymentId)
+                        .with(as(sellerId, Role.VENDOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+        verify(paymentService).confirmReceipt(paymentId, sellerId, Role.VENDOR);
     }
 }

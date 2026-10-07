@@ -4,6 +4,7 @@ import za.ac.cput.prm_marketplace.domain.Address;
 import za.ac.cput.prm_marketplace.domain.CartItem;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.FulfillmentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
@@ -40,6 +41,9 @@ public interface IOrderService {
     /** Every order belonging to {@code requesterId}. Never another user's orders. */
     List<Order> getAll(UUID requesterId);
 
+    /** Orders containing at least one listing from the caller, or an empty list for other roles. */
+    List<Order> getSellerOrders(UUID requesterId, Role role);
+
     /** Kept for callers that already know the buyer id is the caller's own. */
     List<Order> getByBuyer(UUID buyerId);
 
@@ -61,15 +65,20 @@ public interface IOrderService {
      *
      * @param paymentMethod how the buyer intends to pay, or null to fall back to CARD
      */
-    Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod);
+    Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod,
+                   FulfillmentMethod fulfillmentMethod);
+
+    default Order checkout(UUID buyerId, UUID shippingAddressId, PaymentMethod paymentMethod) {
+        return checkout(buyerId, shippingAddressId, paymentMethod, FulfillmentMethod.MEETUP);
+    }
 
     /**
      * Moves an order through its lifecycle.
      *
-     * <p>Two things are checked before anything is written. First, authority: faculty may move any
-     * order, and a vendor may only move an order that contains one of their own products. Holding
-     * a vendor account is not on its own enough — otherwise every seller could advance every other
-     * seller's orders by guessing ids. Second, legality: the move has to be a real step in the
+     * <p>Two things are checked before anything is written. First, authority: admin may move any
+     * order, and a vendor or student seller may only move an order that contains one of their own
+     * products. Holding an eligible account is not on its own enough — otherwise every seller could
+     * advance every other seller's orders by guessing ids. Second, legality: the move has to be a real step in the
      * lifecycle, so a delivered or cancelled order cannot be reopened.
      *
      * @param requesterId the caller, resolved from the token

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { SlidersHorizontal, PackageX } from 'lucide-react';
 import SearchBar from '../components/ui/SearchBar';
 import CategoryChip from '../components/ui/CategoryChip';
@@ -7,15 +7,15 @@ import ProductCard from '../components/ui/ProductCard';
 import EmptyState from '../components/ui/EmptyState';
 import { ProductGridSkeleton } from '../components/ui/Skeleton';
 import Layout from '../components/layout/Layout';
-import { search } from '../api/products';
+import { search, searchAcrossCategories } from '../api/products';
 import { toCardProps } from '../lib/format';
 import { useAsync } from '../hooks/useAsync';
 import { useFavourites } from '../hooks/useFavourites';
 import { useAuth } from '../auth/useAuth';
+import { CAMPUSES } from '../lib/campuses';
+import { GOODS_CATEGORIES, SERVICE_CATEGORIES } from '../lib/marketplaceCategories';
 
 const PAGE_SIZE = 24;
-
-const categories = ['Furniture', 'Electronics', 'Home', 'Books', 'Fashion', 'Bikes'];
 
 // Labels for display, values for the wire. The server compares this against the Condition enum
 // (NEW, LIKE_NEW, GOOD, FAIR, POOR), so a display string sent as-is would silently match nothing.
@@ -39,8 +39,11 @@ const Search = () => {
 
   const searchQuery = params.get('q') ?? '';
   const selectedCategory = params.get('category') ?? 'All';
+  const section = params.get('section') === 'services' ? 'services' : 'goods';
+  const categories = section === 'services' ? SERVICE_CATEGORIES : GOODS_CATEGORIES;
   const condition = params.get('condition') ?? '';
   const city = params.get('city') ?? '';
+  const campus = params.get('campus') ?? '';
   const maxPrice = Number(params.get('maxPrice') ?? MAX_PRICE);
   const page = Number(params.get('page') ?? 0);
 
@@ -62,18 +65,23 @@ const Search = () => {
   };
 
   const loadResults = useCallback(
-    () =>
-      search({
+    () => {
+      const criteria = {
         keyword: searchQuery || undefined,
         category: selectedCategory === 'All' ? undefined : selectedCategory,
         condition: condition || undefined,
         city: city || undefined,
+        campus: campus || undefined,
         maxPrice: maxPrice >= MAX_PRICE ? undefined : maxPrice,
         activeOnly: true,
         page,
         size: PAGE_SIZE,
-      }),
-    [searchQuery, selectedCategory, condition, city, maxPrice, page],
+      };
+      return selectedCategory === 'All'
+        ? searchAcrossCategories(categories.map(({ value }) => value), criteria)
+        : search(criteria);
+    },
+    [searchQuery, categories, selectedCategory, condition, city, campus, maxPrice, page],
   );
 
   const { data, loading, error } = useAsync(loadResults);
@@ -96,7 +104,36 @@ const Search = () => {
   return (
     <Layout>
       <div className="app-container py-6">
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight mb-6">Search</h1>
+        <h1 className="text-2xl font-bold text-text-primary tracking-tight mb-4">
+          {section === 'goods' ? 'Browse goods' : 'Browse services'}
+        </h1>
+
+        <nav className="mb-6 flex flex-wrap items-center gap-2" aria-label="Marketplace sections">
+          <Link
+            to="/marketplace"
+            aria-current={section === 'goods' ? 'page' : undefined}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+              section === 'goods' ? 'bg-primary text-white' : 'bg-lavender text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            Goods
+          </Link>
+          <Link
+            to="/search?section=services"
+            aria-current={section === 'services' ? 'page' : undefined}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+              section === 'services' ? 'bg-primary text-white' : 'bg-lavender text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            Services
+          </Link>
+          <Link
+            to="/bulletin"
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-primary hover:bg-primary-muted"
+          >
+            Community
+          </Link>
+        </nav>
 
         <div className="max-w-2xl">
           <SearchBar
@@ -115,22 +152,29 @@ const Search = () => {
           {showFilters ? 'Hide filters' : 'Show filters'}
         </button>
 
+        <div className="mb-5">
+          <h2 className="mb-3 text-sm font-medium text-text-primary">
+            {section === 'goods' ? 'Goods category' : 'Service category'}
+          </h2>
+          <div className="flex flex-wrap gap-2" aria-label="Filter by category">
+            <CategoryChip
+              label="All"
+              isSelected={selectedCategory === 'All'}
+              onClick={() => update('category', '')}
+            />
+            {categories.map((category) => (
+              <CategoryChip
+                key={category.value}
+                label={category.label}
+                isSelected={selectedCategory === category.value}
+                onClick={() => update('category', category.value)}
+              />
+            ))}
+          </div>
+        </div>
+
         {showFilters && (
           <div className="space-y-5 pb-2 max-w-2xl">
-            <div>
-              <h3 className="text-sm font-medium text-text-primary mb-3">Category</h3>
-              <div className="flex flex-wrap gap-2">
-                {categories.map((category) => (
-                  <CategoryChip
-                    key={category}
-                    label={category}
-                    isSelected={selectedCategory === category}
-                    onClick={() => update('category', category === 'All' ? '' : category)}
-                  />
-                ))}
-              </div>
-            </div>
-
             <div>
               <div className="flex justify-between mb-2">
                 <h3 className="text-sm font-medium text-text-primary">Maximum price</h3>
@@ -165,6 +209,28 @@ const Search = () => {
                 placeholder="e.g. Cape Town"
                 className="w-full rounded-xl border border-border px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
               />
+            </div>
+
+            <div>
+              <label htmlFor="search-campus" className="mb-2 block text-sm font-medium text-text-primary">
+                Seller campus
+              </label>
+              <select
+                id="search-campus"
+                value={campus}
+                onChange={(event) => update('campus', event.target.value)}
+                className="w-full rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">All campuses</option>
+                {CAMPUSES.map((campusOption) => (
+                  <option key={campusOption} value={campusOption}>{campusOption}</option>
+                ))}
+              </select>
+              {isAuthenticated && (
+                <p className="mt-1 text-xs text-text-muted">
+                  Campus filters match listings from student sellers who selected a campus in their profile.
+                </p>
+              )}
             </div>
 
             <div>

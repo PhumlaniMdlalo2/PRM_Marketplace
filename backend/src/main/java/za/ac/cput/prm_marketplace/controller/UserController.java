@@ -29,7 +29,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
  * are gone. Both took a {@code User} entity from the request body and both are privilege
  * escalations: {@code PUT} in particular took the target account from {@code user.getId()} in the
  * body and saved every field of it, so any authenticated caller could set another account's
- * {@code role} to faculty or write a plaintext password into the column. Nothing in the frontend
+ * {@code role} to admin or write a plaintext password into the column. Nothing in the frontend
  * called them. Accounts are created through {@code POST /api/auth/register} and passwords are
  * changed through {@code PUT /api/auth/change-password}, both of which apply their own rules.
  */
@@ -67,7 +67,8 @@ public class UserController {
     public ResponseEntity<UserResponse> updateMe(Authentication caller,
                                                  @Valid @RequestBody UpdateProfileRequest request) {
         User updated = userService.updateProfile(
-                CurrentCaller.id(caller), request.name(), request.phone(), request.avatarUrl());
+                CurrentCaller.id(caller), request.name(), request.phone(), request.avatarUrl(),
+                request.campus());
         if (updated == null) {
             return ResponseEntity.notFound().build();
         }
@@ -89,22 +90,22 @@ public class UserController {
     }
 
     /**
-     * Every account. Faculty-only: it is a moderation view, and open to any signed-in user it hands
+     * Every account. Admin-only: it is a moderation view, and open to any signed-in user it hands
      * over every member's email address and phone number in one request.
      */
     @GetMapping
     public ResponseEntity<List<UserResponse>> getAll(Authentication caller) {
-        requireFaculty(caller);
+        requireAdmin(caller);
         return ResponseEntity.ok(UserMapper.toResponseList(userService.getAll()));
     }
 
     /**
-     * Lookup by email. Faculty-only, for the same reason as {@link #getAll}: unrestricted, it is a
+     * Lookup by email. Admin-only, for the same reason as {@link #getAll}: unrestricted, it is a
      * membership oracle that confirms whether a given address has an account here.
      */
     @GetMapping("/email/{email}")
     public ResponseEntity<UserResponse> findByEmail(Authentication caller, @PathVariable String email) {
-        requireFaculty(caller);
+        requireAdmin(caller);
         return userService.findByEmail(email)
                 .map(UserMapper::toResponse)
                 .map(ResponseEntity::ok)
@@ -112,7 +113,7 @@ public class UserController {
     }
 
     /**
-     * Account deletion, for self-service account closure. Faculty may delete any account.
+     * Account deletion, for self-service account closure. Admin may delete any account.
      *
      * <p>Previously any signed-in user could delete any account by id.
      */
@@ -122,7 +123,7 @@ public class UserController {
     })
     public ResponseEntity<Void> delete(Authentication caller, @PathVariable UUID id) {
         UUID callerId = CurrentCaller.id(caller);
-        if (!callerId.equals(id) && CurrentCaller.role(caller) != Role.FACULTY) {
+        if (!callerId.equals(id) && CurrentCaller.role(caller) != Role.ADMIN) {
             throw new ForbiddenException("You may only delete your own account");
         }
         if (!userService.delete(id)) {
@@ -131,9 +132,9 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
-    private void requireFaculty(Authentication caller) {
-        if (CurrentCaller.role(caller) != Role.FACULTY) {
-            throw new ForbiddenException("Faculty access is required");
+    private void requireAdmin(Authentication caller) {
+        if (CurrentCaller.role(caller) != Role.ADMIN) {
+            throw new ForbiddenException("Admin access is required");
         }
     }
 }

@@ -60,7 +60,7 @@ class NestedUserExposureTest {
                 .setEmail(secretEmail)
                 .setPhone(secretPhone)
                 .setPasswordHash(secretHash)
-                .setRole(Role.FACULTY)
+                .setRole(Role.ADMIN)
                 .setVerified(true)
                 .setCreatedAt(LocalDateTime.now())
                 .build();
@@ -80,7 +80,7 @@ class NestedUserExposureTest {
                     .as("%s must not expose the password hash", carrier.label())
                     .doesNotContain(secretHash)
                     .as("%s must not expose the role", carrier.label())
-                    .doesNotContain("FACULTY")
+                    .doesNotContain("ADMIN")
                     .as("%s must not nest the whole user object", carrier.label())
                     .doesNotContain("\"passwordHash\"");
         }

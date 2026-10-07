@@ -183,16 +183,16 @@ class ReportControllerTest {
     }
 
     @Test
-    @DisplayName("faculty can list every report and filter by status")
-    void moderationView_isAvailableToFaculty() throws Exception {
-        when(reportService.getAll(Role.FACULTY)).thenReturn(List.of(report));
-        when(reportService.getByStatus(ReportStatus.OPEN, Role.FACULTY)).thenReturn(List.of(report));
+    @DisplayName("admin can list every report and filter by status")
+    void moderationView_isAvailableToAdmin() throws Exception {
+        when(reportService.getAll(Role.ADMIN)).thenReturn(List.of(report));
+        when(reportService.getByStatus(ReportStatus.OPEN, Role.ADMIN)).thenReturn(List.of(report));
 
-        mockMvc.perform(get("/api/reports/moderation/all").with(as(reporterId, Role.FACULTY)))
+        mockMvc.perform(get("/api/reports/moderation/all").with(as(reporterId, Role.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(reportId.toString()));
 
-        mockMvc.perform(get("/api/reports/moderation/status/OPEN").with(as(reporterId, Role.FACULTY)))
+        mockMvc.perform(get("/api/reports/moderation/status/OPEN").with(as(reporterId, Role.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(reportId.toString()));
     }
@@ -209,13 +209,13 @@ class ReportControllerTest {
     }
 
     @Test
-    @DisplayName("faculty can resolve a report")
-    void resolve_isAllowedForFaculty() throws Exception {
+    @DisplayName("admin can resolve a report")
+    void resolve_isAllowedForAdmin() throws Exception {
         when(reportService.resolve(reportId, ReportStatus.RESOLVED, "Vendor corrected the listing",
-                reporterId, Role.FACULTY)).thenReturn(report);
+                reporterId, Role.ADMIN)).thenReturn(report);
 
         mockMvc.perform(patch("/api/reports/" + reportId + "/status")
-                        .with(as(reporterId, Role.FACULTY))
+                        .with(as(reporterId, Role.ADMIN))
                         .param("status", "RESOLVED")
                         .param("notes", "Vendor corrected the listing"))
                 .andExpect(status().isOk())

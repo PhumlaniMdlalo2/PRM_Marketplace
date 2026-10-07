@@ -20,6 +20,7 @@ public final class UserMapper {
                 user.getName(),
                 user.getEmail(),
                 user.getRole(),
+                user.getCampus(),
                 user.getPhone(),
                 user.getAvatarUrl(),
                 user.isVerified(),

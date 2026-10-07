@@ -18,5 +18,9 @@ public interface BulletinPostRepository extends JpaRepository<BulletinPost, UUID
 
     List<BulletinPost> findAllByOrderByCreatedAtDesc();
 
+    List<BulletinPost> findByStudentGroupIdOrderByCreatedAtDesc(UUID studentGroupId);
+
+    List<BulletinPost> findByStudentGroupIsNullOrderByCreatedAtDesc();
+
     List<BulletinPost> findByCategoryOrderByCreatedAtDesc(String category);
 }

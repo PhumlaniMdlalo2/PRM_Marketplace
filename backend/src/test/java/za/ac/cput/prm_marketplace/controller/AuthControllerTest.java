@@ -56,7 +56,7 @@ class AuthControllerTest {
     private IAuthService authService;
 
     private UserResponse buildUser(boolean verified) {
-        return new UserResponse(UUID.randomUUID(), "Jane Doe", "jane@example.com", Role.STUDENT,
+        return new UserResponse(UUID.randomUUID(), "Jane Doe", "jane@example.com", Role.STUDENT, null,
                 null, null, verified, null);
     }
 

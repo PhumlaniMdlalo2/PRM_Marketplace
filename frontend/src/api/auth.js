@@ -14,14 +14,16 @@ export const login = async (email, password) => {
 };
 
 export const register = async (payload) => {
-  // `role` is deliberately omitted. The server grants only the self-service roles and rejects
-  // anything else, so sending a role the UI never legitimately offers would just be a way to
-  // provoke a 400.
+  // The user selects only public account types here. Admin privileges remain provisioned by the
+  // backend and cannot be granted by a registration request.
   const { data } = await api.post('/auth/register', {
+    role: payload.role,
     name: payload.name,
     email: payload.email,
     password: payload.password,
     phone: payload.phone || undefined,
+    businessName: payload.businessName || undefined,
+    registrationNo: payload.registrationNo || undefined,
   });
   return data;
 };

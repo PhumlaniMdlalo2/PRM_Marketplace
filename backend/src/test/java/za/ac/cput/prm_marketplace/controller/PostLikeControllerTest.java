@@ -10,8 +10,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
 import za.ac.cput.prm_marketplace.domain.PostLike;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.service.IPostLikeService;
+import za.ac.cput.prm_marketplace.service.IStudentDiscussionGroupService;
+import za.ac.cput.prm_marketplace.domain.Role;
 
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +40,9 @@ class PostLikeControllerTest {
     @MockitoBean
     private IPostLikeService postLikeService;
 
+    @MockitoBean
+    private IStudentDiscussionGroupService groupService;
+
     private UUID callerId;
     private UUID postId;
     private UUID likeId;
@@ -45,6 +51,10 @@ class PostLikeControllerTest {
 
     @BeforeEach
     void setUp() {
+        when(groupService.canReadPost(
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(Role.class))).thenReturn(true);
         callerId = UUID.randomUUID();
         postId = UUID.randomUUID();
         likeId = UUID.randomUUID();
@@ -102,6 +112,17 @@ class PostLikeControllerTest {
 
         mockMvc.perform(post("/api/post-likes/post/" + postId + "/toggle").with(asStudent(callerId)))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("group like counts are hidden from callers without group access")
+    void count_hidesGroupLikesWithoutMembership() throws Exception {
+        when(groupService.canReadPost(postId, callerId, Role.STUDENT)).thenReturn(false);
+
+        mockMvc.perform(get("/api/post-likes/post/" + postId + "/count").with(asStudent(callerId)))
+                .andExpect(status().isNotFound());
+
+        verify(postLikeService, never()).countByPost(postId);
     }
 
     @Test

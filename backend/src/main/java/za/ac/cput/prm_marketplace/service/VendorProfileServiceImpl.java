@@ -5,10 +5,12 @@ import org.springframework.transaction.annotation.Transactional;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.dto.SellerPayoutDetails;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -30,9 +32,9 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
             return null;
         }
 
-        // Only a VENDOR account can hold a seller profile. Without this any student could open a
-        // storefront, which is not what the role exists to mean.
-        if (requesterRole != Role.VENDOR) {
+        // Vendors get a profile during signup; students may apply later without losing their
+        // student role. Community and admin accounts cannot create seller profiles.
+        if (requesterRole != Role.VENDOR && requesterRole != Role.STUDENT) {
             return null;
         }
 
@@ -49,7 +51,7 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
 
         // Everything the caller sent except the business details is discarded. verified and
         // ratingAvg in particular: a seller who could post verified:true would be marking
-        // themselves trusted, and there is nothing else in the flow that sets it.
+        // themselves approved without admin review.
         VendorProfile created = new VendorProfile.Builder()
                 .setUser(owner)
                 .setBusinessName(profile.getBusinessName().trim())
@@ -85,14 +87,20 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
         // Rebuilt from the stored row so only the two editable fields can move. The owner's id and
         // the verified flag are re-applied from what is already in the database, which is what
         // stops an edit being used to grant or keep verification.
+        String businessName = profile.getBusinessName() != null && !profile.getBusinessName().isBlank()
+                ? profile.getBusinessName().trim()
+                : existing.getBusinessName();
+        String registrationNo = profile.getRegistrationNo() != null
+                ? normaliseOptional(profile.getRegistrationNo())
+                : existing.getRegistrationNo();
+        boolean sellerDetailsChanged = !Objects.equals(existing.getBusinessName(), businessName)
+                || !Objects.equals(existing.getRegistrationNo(), registrationNo);
+
         VendorProfile updated = new VendorProfile.Builder()
                 .copy(existing)
-                .setBusinessName(profile.getBusinessName() != null && !profile.getBusinessName().isBlank()
-                        ? profile.getBusinessName().trim()
-                        : existing.getBusinessName())
-                .setRegistrationNo(profile.getRegistrationNo() != null
-                        ? profile.getRegistrationNo()
-                        : existing.getRegistrationNo())
+                .setBusinessName(businessName)
+                .setRegistrationNo(registrationNo)
+                .setVerified(existing.isVerified() && !sellerDetailsChanged)
                 .build();
 
         return vendorProfileRepository.save(updated);
@@ -103,7 +111,7 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
     public VendorProfile verify(UUID id, boolean verified, UUID requesterId, Role requesterRole) {
         // Checked before anything is read, so a non-moderator gets the same answer whether or not
         // the profile exists and cannot use this to probe the seller directory.
-        if (requesterRole != Role.FACULTY || id == null) {
+        if (requesterRole != Role.ADMIN || id == null) {
             return null;
         }
 
@@ -138,5 +146,61 @@ public class VendorProfileServiceImpl implements IVendorProfileService {
             return null;
         }
         return vendorProfileRepository.findByUserId(requesterId).orElse(null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SellerPayoutDetails getMyPayoutDetails(UUID requesterId) {
+        if (requesterId == null) {
+            return null;
+        }
+        VendorProfile profile = vendorProfileRepository.findByUserId(requesterId).orElse(null);
+        return profile == null ? null : payoutDetails(profile);
+    }
+
+    @Override
+    @Transactional
+    public SellerPayoutDetails updateMyPayoutDetails(UUID requesterId, SellerPayoutDetails details) {
+        if (requesterId == null || !isValidPayoutDetails(details)) {
+            return null;
+        }
+        VendorProfile profile = vendorProfileRepository.findByUserId(requesterId).orElse(null);
+        if (profile == null) {
+            return null;
+        }
+        VendorProfile updated = new VendorProfile.Builder()
+                .copy(profile)
+                .setPayoutDetails(trim(details.accountHolder()), trim(details.bankName()),
+                        trim(details.accountNumber()), trim(details.branchCode()), trim(details.accountType()))
+                .build();
+        return payoutDetails(vendorProfileRepository.save(updated));
+    }
+
+    private static SellerPayoutDetails payoutDetails(VendorProfile profile) {
+        return new SellerPayoutDetails(profile.getPayoutAccountHolder(), profile.getPayoutBankName(),
+                profile.getPayoutAccountNumber(), profile.getPayoutBranchCode(), profile.getPayoutAccountType());
+    }
+
+    private static boolean isValidPayoutDetails(SellerPayoutDetails details) {
+        return details != null
+                && hasText(details.accountHolder(), 120)
+                && hasText(details.bankName(), 120)
+                && details.accountNumber() != null
+                && details.accountNumber().trim().matches("[0-9]{6,20}")
+                && details.branchCode() != null
+                && details.branchCode().trim().matches("[0-9]{4,10}")
+                && hasText(details.accountType(), 40);
+    }
+
+    private static boolean hasText(String value, int maxLength) {
+        return value != null && !value.isBlank() && value.trim().length() <= maxLength;
+    }
+
+    private static String trim(String value) {
+        return value.trim();
+    }
+
+    private static String normaliseOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

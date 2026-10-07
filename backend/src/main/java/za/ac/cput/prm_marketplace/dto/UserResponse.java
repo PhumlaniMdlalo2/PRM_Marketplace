@@ -10,6 +10,7 @@ public record UserResponse(
         String name,
         String email,
         Role role,
+        String campus,
         String phone,
         String avatarUrl,
         boolean verified,

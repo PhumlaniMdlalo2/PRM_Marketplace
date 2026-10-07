@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
+import Landing from './pages/Landing';
 import Search from './pages/Search';
 import ProductDetails from './pages/ProductDetails';
 import Login from './pages/Login';
@@ -12,6 +13,7 @@ import Conversation from './pages/Conversation';
 import Orders from './pages/Orders';
 import Cart from './pages/Cart';
 import Bulletin from './pages/Bulletin';
+import StudentGroups from './pages/StudentGroups';
 import CreatePost from './pages/CreatePost';
 import PostComments from './pages/PostComments';
 import Profile from './pages/Profile';
@@ -21,16 +23,20 @@ import SavedItems from './pages/SavedItems';
 import Vendors from './pages/Vendors';
 import VendorStore from './pages/VendorStore';
 import Moderation from './pages/Moderation';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminUsers from './pages/AdminUsers';
 import CreateListing from './pages/CreateListing';
 import EditListing from './pages/EditListing';
 import MyListings from './pages/MyListings';
 import OrderDetail from './pages/OrderDetail';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './auth/ProtectedRoute';
+import AdminRoute from './auth/AdminRoute';
 
 /**
- * Public routes are the ones the backend serves without a token: browsing the catalogue, reading
- * the bulletin and its comments, and the auth pages themselves.
+ * Public routes are the ones the backend serves without a token: the landing page, catalogue,
+ * sellers, bulletin and its comments, and the auth pages themselves.
  *
  * Everything else is wrapped. That list is deliberately not the same as "every route that touches a
  * user": `/bulletin/:id` reads a thread and is public, but the same page has a comment box that
@@ -43,13 +49,15 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/marketplace" element={<Home />} />
         <Route path="/search" element={<Search />} />
         <Route path="/product/:id" element={<ProductDetails />} />
         {/* Public: the directory is the same audience as the catalogue it sits beside. */}
         <Route path="/vendors" element={<Vendors />} />
         <Route path="/vendors/:id" element={<VendorStore />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/verification" element={<Verification />} />
         {/* The reset flow is public because the user has lost the credential that would let them
@@ -67,14 +75,18 @@ function App() {
         <Route path="/profile/edit" element={protectedPage(<EditProfile />)} />
         <Route path="/settings" element={protectedPage(<Settings />)} />
         {/* Behind a login like every other page a reader has a personal stake in; the queue itself
-            then checks the role, because faculty accounts are decided by the server. */}
+            then checks the role, because admin accounts are decided by the server. */}
         <Route path="/moderation" element={protectedPage(<Moderation />)} />
+        <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+        <Route path="/admin/moderation" element={<AdminRoute><Moderation /></AdminRoute>} />
+        <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
         <Route path="/saved" element={protectedPage(<SavedItems />)} />
         <Route path="/listing/create" element={protectedPage(<CreateListing />)} />
         <Route path="/listing/edit/:id" element={protectedPage(<EditListing />)} />
         <Route path="/listing/mine" element={protectedPage(<MyListings />)} />
 
         <Route path="/bulletin" element={<Bulletin />} />
+        <Route path="/student-groups" element={protectedPage(<StudentGroups />)} />
         <Route path="/bulletin/create" element={protectedPage(<CreatePost />)} />
         <Route path="/bulletin/:id" element={<PostComments />} />
 

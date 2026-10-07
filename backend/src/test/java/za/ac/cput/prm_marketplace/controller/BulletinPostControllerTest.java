@@ -12,8 +12,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 import za.ac.cput.prm_marketplace.domain.BulletinPost;
+import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.service.IBulletinPostService;
+import za.ac.cput.prm_marketplace.service.IStudentDiscussionGroupService;
+import za.ac.cput.prm_marketplace.domain.Role;
 
 import java.util.List;
 import java.util.UUID;
@@ -45,6 +48,9 @@ class BulletinPostControllerTest {
     @MockitoBean
     private IBulletinPostService bulletinPostService;
 
+    @MockitoBean
+    private IStudentDiscussionGroupService groupService;
+
     private UUID authorId;
     private UUID intruderId;
     private UUID postId;
@@ -52,6 +58,10 @@ class BulletinPostControllerTest {
 
     @BeforeEach
     void setUp() {
+        when(groupService.canReadPost(
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(UUID.class),
+                org.mockito.ArgumentMatchers.nullable(Role.class))).thenReturn(true);
         authorId = UUID.randomUUID();
         intruderId = UUID.randomUUID();
         postId = UUID.randomUUID();
@@ -112,6 +122,17 @@ class BulletinPostControllerTest {
 
         mockMvc.perform(get("/api/bulletin-posts/" + postId).with(asStudent(authorId)))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("group posts are hidden from callers without group access")
+    void read_hidesGroupPostsWithoutMembership() throws Exception {
+        when(groupService.canReadPost(postId, authorId, Role.STUDENT)).thenReturn(false);
+
+        mockMvc.perform(get("/api/bulletin-posts/" + postId).with(asStudent(authorId)))
+                .andExpect(status().isNotFound());
+
+        verify(bulletinPostService, never()).read(postId);
     }
 
     @Test

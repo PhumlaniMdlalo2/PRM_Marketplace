@@ -20,16 +20,27 @@ export const getMe = async () => {
   return data;
 };
 
+/** Every marketplace account. The backend restricts this directory to admins. */
+export const listUsers = async () => {
+  const { data } = await api.get('/users');
+  return Array.isArray(data) ? data : [];
+};
+
+/** Deletes an account by id. Admins may remove accounts other than their own. */
+export const deleteUser = async (id) => {
+  await api.delete(`/users/${id}`);
+};
+
 /**
  * Saves the caller's own profile.
  *
  * `phone` and `avatarUrl` are replaced outright, so a blank value clears the field: the server is
  * told what the fields are now, not which ones changed. Send the whole form.
  *
- * @param {{ name: string, phone?: string, avatarUrl?: string }} profile
+ * @param {{ name: string, phone?: string, avatarUrl?: string, campus?: string }} profile
  * @returns {Promise<object>} the saved account, which the session should adopt
  */
-export const updateMe = async ({ name, phone, avatarUrl }) => {
-  const { data } = await api.put('/users/me', { name, phone, avatarUrl });
+export const updateMe = async ({ name, phone, avatarUrl, campus }) => {
+  const { data } = await api.put('/users/me', { name, phone, avatarUrl, campus });
   return data;
 };

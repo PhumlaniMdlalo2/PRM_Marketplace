@@ -1,19 +1,19 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Sparkles, Store } from 'lucide-react';
+import { useAuth } from '../auth/useAuth';
 import SearchBar from '../components/ui/SearchBar';
 import CategoryChip from '../components/ui/CategoryChip';
 import ProductCard from '../components/ui/ProductCard';
 import { ProductGridSkeleton } from '../components/ui/Skeleton';
 import Layout from '../components/layout/Layout';
-import { search } from '../api/products';
+import { search, searchAcrossCategories } from '../api/products';
+import { getMyVendorProfile } from '../api/vendorProfile';
 import { toCardProps } from '../lib/format';
 import { useAsync } from '../hooks/useAsync';
 import { useFavourites } from '../hooks/useFavourites';
-
-// The categories the backend actually stores. These are the values the Product.category column is
-// compared against, so they are not free-text labels chosen for the UI.
-const categories = ['Furniture', 'Electronics', 'Fashion', 'Bikes'];
+import { GOODS_CATEGORIES, SERVICE_CATEGORIES } from '../lib/marketplaceCategories';
+import SellerHome from './SellerHome';
 
 /**
  * Renders a grid of product cards with working hearts.
@@ -36,21 +36,75 @@ const FavouritedGrid = ({ products, favourites, onNavigate }) => (
 );
 
 const Home = () => {
+  const { user } = useAuth();
+  const isSellerEligible = user?.role === 'VENDOR' || user?.role === 'STUDENT';
+  const loadSellerProfile = useCallback(() => getMyVendorProfile(), []);
+  const {
+    data: sellerProfile,
+    loading: sellerProfileLoading,
+    error: sellerProfileError,
+    run: reloadSellerProfile,
+  } = useAsync(loadSellerProfile, { immediate: isSellerEligible });
+
+  if (user?.role === 'VENDOR') {
+    return (
+      <SellerHome
+        user={user}
+        profile={sellerProfile}
+        profileLoading={sellerProfileLoading}
+        profileError={sellerProfileError}
+        onRetry={reloadSellerProfile}
+      />
+    );
+  }
+
+  if (user?.role === 'STUDENT' && sellerProfileLoading) {
+    return (
+      <Layout>
+        <div className="app-container py-10">
+          <div className="h-36 max-w-3xl animate-pulse rounded-3xl bg-lavender" role="status">
+            <span className="sr-only">Checking seller workspace</span>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (user?.role === 'STUDENT' && sellerProfile) {
+    return <SellerHome user={user} profile={sellerProfile} />;
+  }
+
+  return (
+    <BuyerHome
+      sellerProfileError={
+        user?.role === 'STUDENT' && sellerProfileError?.status !== 404 ? sellerProfileError : null
+      }
+    />
+  );
+};
+
+const BuyerHome = ({ sellerProfileError }) => {
   const { hash } = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [section, setSection] = useState('goods');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const forYouRef = useRef(null);
+  const categories = section === 'services' ? SERVICE_CATEGORIES : GOODS_CATEGORIES;
 
   const loadFeatured = useCallback(
-    () =>
-      search({
+    () => {
+      const criteria = {
         keyword: searchQuery || undefined,
         category: selectedCategory === 'All' ? undefined : selectedCategory,
         activeOnly: true,
         size: 12,
-      }),
-    [searchQuery, selectedCategory],
+      };
+      return selectedCategory === 'All'
+        ? searchAcrossCategories(categories.map(({ value }) => value), criteria)
+        : search(criteria);
+    },
+    [categories, searchQuery, selectedCategory],
   );
 
   const { data, loading, error } = useAsync(loadFeatured);
@@ -69,15 +123,64 @@ const Home = () => {
   return (
     <Layout>
       <div className="app-container py-6">
-        <div className="max-w-2xl pt-4">
+        {sellerProfileError && (
+          <p role="alert" className="mb-4 text-sm text-error">
+            We could not check your seller profile. The buyer catalogue is available, but seller status may be out of date.
+          </p>
+        )}
+        <section className="marketplace-intro">
+          <div>
+            <p className="marketplace-kicker">Your campus marketplace</p>
+            <h1>Find what campus needs.</h1>
+            <p>Browse goods, find services and catch up with your campus community.</p>
+          </div>
           <SearchBar
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="mb-6"
+            className="marketplace-search"
           />
+        </section>
+
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex gap-1 rounded-xl bg-lavender p-1" role="tablist" aria-label="Marketplace sections">
+            {[
+              { id: 'goods', label: 'Goods' },
+              { id: 'services', label: 'Services' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={section === item.id}
+                aria-controls="marketplace-category-panel"
+                onClick={() => {
+                  setSection(item.id);
+                  setSelectedCategory('All');
+                }}
+                className={`min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors ${
+                  section === item.id
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <Link
+            to="/bulletin"
+            className="shrink-0 px-1 py-2 text-sm font-semibold text-primary transition-colors hover:text-primary-hover"
+          >
+            Community
+          </Link>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide" role="tablist" aria-label="Product categories">
+        <div
+          className="marketplace-categories flex gap-2 overflow-x-auto pb-0 scrollbar-hide"
+          id="marketplace-category-panel"
+          role="tabpanel"
+          aria-label={section === 'goods' ? 'Goods categories' : 'Services categories'}
+        >
           <CategoryChip
             label="All"
             isSelected={selectedCategory === 'All'}
@@ -85,10 +188,10 @@ const Home = () => {
           />
           {categories.map((category) => (
             <CategoryChip
-              key={category}
-              label={category}
-              isSelected={selectedCategory === category}
-              onClick={() => setSelectedCategory(category)}
+              key={category.value}
+              label={category.label}
+              isSelected={selectedCategory === category.value}
+              onClick={() => setSelectedCategory(category.value)}
             />
           ))}
         </div>
@@ -97,10 +200,10 @@ const Home = () => {
             one of the product filters. */}
         <Link
           to="/vendors"
-          className="mb-3 inline-flex items-center gap-2 rounded-full bg-lavender px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-lavender-dark"
+          className="mb-3 inline-flex items-center gap-2 px-1 py-2 text-sm font-semibold text-primary transition-colors hover:text-primary-hover"
         >
           <Store size={16} className="text-primary" />
-          Browse all sellers
+          Browse the seller directory
         </Link>
 
         {favourites.error && (
@@ -111,7 +214,9 @@ const Home = () => {
 
         <div className="mt-7">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-text-primary">Featured items</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
+              {section === 'goods' ? 'Featured goods' : 'Featured services'}
+            </h2>
             <span className="text-xs font-medium text-text-muted">
               {data ? `${data.totalElements} results` : ''}
             </span>
@@ -127,14 +232,16 @@ const Home = () => {
             <ProductGridSkeleton count={6} />
           ) : products.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-text-secondary">No items match your search</p>
+              <p className="text-text-secondary">
+                No {section === 'goods' ? 'goods' : 'services'} match your search yet.
+              </p>
             </div>
           ) : (
             <FavouritedGrid products={products} favourites={favourites} onNavigate={openProduct} />
           )}
         </div>
 
-        <ForYouSection ref={forYouRef} />
+        <ForYouSection key={section} ref={forYouRef} section={section} />
       </div>
     </Layout>
   );
@@ -149,20 +256,25 @@ export default Home;
  * data in it; the copy describes an intention, not behaviour, and should either be reworded or the
  * ranking actually built.
  */
-const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
+const ForYouSection = forwardRef(function ForYouSection({ section }, ref) {
   const navigate = useNavigate();
   const [fyCategory, setFyCategory] = useState('All');
+  const categories = section === 'services' ? SERVICE_CATEGORIES : GOODS_CATEGORIES;
 
   const loadForYou = useCallback(
-    () =>
-      search({
+    () => {
+      const criteria = {
         category: fyCategory === 'All' ? undefined : fyCategory,
         activeOnly: true,
         size: 8,
         sortBy: 'createdAt',
         direction: 'desc',
-      }),
-    [fyCategory],
+      };
+      return fyCategory === 'All'
+        ? searchAcrossCategories(categories.map(({ value }) => value), criteria)
+        : search(criteria);
+    },
+    [categories, fyCategory],
   );
 
   const { data, loading } = useAsync(loadForYou);
@@ -181,18 +293,23 @@ const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
           <Sparkles size={22} className="text-primary" />
         </div>
         <div className="flex-1">
-          <h2 className="text-xl font-bold text-text-primary tracking-tight leading-tight">For You</h2>
-          <p className="text-sm text-text-secondary">Latest listings across the marketplace</p>
+          <h2 className="text-xl font-bold text-text-primary tracking-tight leading-tight">Just listed</h2>
+            <p className="text-sm text-text-secondary">Fresh finds from the Vendra community</p>
         </div>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide" role="tablist" aria-label="For you categories">
+        <CategoryChip
+          label="All"
+          isSelected={fyCategory === 'All'}
+          onClick={() => setFyCategory('All')}
+        />
         {categories.map((category) => (
           <CategoryChip
-            key={category}
-            label={category}
-            isSelected={fyCategory === category}
-            onClick={() => setFyCategory(category)}
+            key={category.value}
+            label={category.label}
+            isSelected={fyCategory === category.value}
+            onClick={() => setFyCategory(category.value)}
           />
         ))}
       </div>
@@ -200,7 +317,9 @@ const ForYouSection = forwardRef(function ForYouSection(_props, ref) {
       <div className="mt-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-text-primary">
-            {fyCategory === 'All' ? 'Newest listings' : `${fyCategory} picks`}
+            {fyCategory === 'All'
+              ? section === 'goods' ? 'New goods around campus' : 'New services around campus'
+              : `New in ${categories.find((category) => category.value === fyCategory)?.label ?? fyCategory}`}
           </h3>
           <span className="text-xs font-medium text-text-muted">
             {data ? `${data.totalElements} items` : ''}

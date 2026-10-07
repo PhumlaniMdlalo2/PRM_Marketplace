@@ -133,7 +133,7 @@ class UserControllerTest {
                 .setPasswordHash("hash").setRole(Role.STUDENT)
                 .setPhone("0722222222").setAvatarUrl("https://cdn.example.com/a.png")
                 .build();
-        when(userService.updateProfile(any(), any(), any(), any())).thenReturn(saved);
+        when(userService.updateProfile(any(), any(), any(), any(), any())).thenReturn(saved);
 
         mockMvc.perform(put("/api/users/me").with(asCaller())
                         .contentType("application/json")
@@ -144,20 +144,20 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.name").value("Jane Roe"));
 
         verify(userService).updateProfile(
-                eq(callerId), eq("Jane Roe"), eq("0722222222"), eq("https://cdn.example.com/a.png"));
+                eq(callerId), eq("Jane Roe"), eq("0722222222"), eq("https://cdn.example.com/a.png"), eq(null));
     }
 
     @Test
     @DisplayName("PUT /api/users/me ignores a role or password smuggled into the body")
     void updateMeCannotEscalateThroughTheBody() throws Exception {
         // The stored account stays a student, and the response must not claim otherwise.
-        when(userService.updateProfile(any(), any(), any(), any()))
+        when(userService.updateProfile(any(), any(), any(), any(), any()))
                 .thenReturn(buildUser(callerId, Role.STUDENT));
 
         mockMvc.perform(put("/api/users/me").with(asCaller())
                         .contentType("application/json")
                         .content("""
-                                {"id":"%s","name":"Jane Doe","role":"FACULTY",
+                                {"id":"%s","name":"Jane Doe","role":"ADMIN",
                                  "password":"hunter2","email":"attacker@evil.example",
                                  "verified":true}""".formatted(intruderId)))
                 .andExpect(status().isOk())
@@ -167,14 +167,14 @@ class UserControllerTest {
 
         // The escalation never reaches the service: only the allowlisted values are passed, and the
         // id it updates is the caller's own rather than the one in the body.
-        verify(userService).updateProfile(eq(callerId), eq("Jane Doe"), eq(null), eq(null));
-        verify(userService, never()).updateProfile(eq(intruderId), any(), any(), any());
+        verify(userService).updateProfile(eq(callerId), eq("Jane Doe"), eq(null), eq(null), eq(null));
+        verify(userService, never()).updateProfile(eq(intruderId), any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("PUT /api/users/me is 404 when the account behind the token no longer exists")
     void updateMeReturnsNotFoundWhenAccountIsGone() throws Exception {
-        when(userService.updateProfile(any(), any(), any(), any())).thenReturn(null);
+        when(userService.updateProfile(any(), any(), any(), any(), any())).thenReturn(null);
 
         mockMvc.perform(put("/api/users/me").with(asCaller())
                         .contentType("application/json")
@@ -193,7 +193,7 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.name").exists());
 
-        verify(userService, never()).updateProfile(any(), any(), any(), any());
+        verify(userService, never()).updateProfile(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -206,7 +206,7 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.avatarUrl").exists());
 
-        verify(userService, never()).updateProfile(any(), any(), any(), any());
+        verify(userService, never()).updateProfile(any(), any(), any(), any(), any());
     }
 
     // ---- the retired write endpoints ---------------------------------------------------------------
@@ -217,7 +217,7 @@ class UserControllerTest {
         mockMvc.perform(put("/api/users").with(asCaller())
                         .contentType("application/json")
                         .content("""
-                                {"id":"%s","role":"FACULTY"}""".formatted(intruderId)))
+                                {"id":"%s","role":"ADMIN"}""".formatted(intruderId)))
                 .andExpect(status().isMethodNotAllowed());
     }
 
@@ -227,7 +227,7 @@ class UserControllerTest {
         mockMvc.perform(post("/api/users").with(asCaller())
                         .contentType("application/json")
                         .content("""
-                                {"email":"attacker@evil.example","role":"FACULTY",
+                                {"email":"attacker@evil.example","role":"ADMIN",
                                  "passwordHash":"x"}"""))
                 .andExpect(status().isMethodNotAllowed());
     }
@@ -257,21 +257,21 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("listing every account is faculty-only")
-    void getAllIsFacultyOnly() throws Exception {
-        when(userService.getAll()).thenReturn(List.of(buildUser(callerId, Role.FACULTY)));
+    @DisplayName("listing every account is admin-only")
+    void getAllIsAdminOnly() throws Exception {
+        when(userService.getAll()).thenReturn(List.of(buildUser(callerId, Role.ADMIN)));
 
         mockMvc.perform(get("/api/users").with(asCaller()))
                 .andExpect(status().isForbidden());
 
-        mockMvc.perform(get("/api/users").with(as(callerId, Role.FACULTY)))
+        mockMvc.perform(get("/api/users").with(as(callerId, Role.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].email").value("jane@example.com"));
     }
 
     @Test
-    @DisplayName("lookup by email is faculty-only, so it cannot be used to test for membership")
-    void findByEmailIsFacultyOnly() throws Exception {
+    @DisplayName("lookup by email is admin-only, so it cannot be used to test for membership")
+    void findByEmailIsAdminOnly() throws Exception {
         when(userService.findByEmail("jane@example.com"))
                 .thenReturn(Optional.of(buildUser(callerId, Role.STUDENT)));
 
@@ -279,18 +279,18 @@ class UserControllerTest {
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/users/email/{email}", "jane@example.com")
-                        .with(as(callerId, Role.FACULTY)))
+                        .with(as(callerId, Role.ADMIN)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("jane@example.com"));
     }
 
     @Test
-    @DisplayName("a missing email is 404 for faculty")
+    @DisplayName("a missing email is 404 for admin")
     void findByEmailReturnsNotFoundWhenMissing() throws Exception {
         when(userService.findByEmail("missing@example.com")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/users/email/{email}", "missing@example.com")
-                        .with(as(callerId, Role.FACULTY)))
+                        .with(as(callerId, Role.ADMIN)))
                 .andExpect(status().isNotFound());
     }
 
@@ -315,11 +315,11 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("faculty can delete an account")
-    void facultyCanDeleteAnyAccount() throws Exception {
+    @DisplayName("admin can delete an account")
+    void adminCanDeleteAnyAccount() throws Exception {
         when(userService.delete(intruderId)).thenReturn(true);
 
-        mockMvc.perform(delete("/api/users/{id}", intruderId).with(as(callerId, Role.FACULTY)))
+        mockMvc.perform(delete("/api/users/{id}", intruderId).with(as(callerId, Role.ADMIN)))
                 .andExpect(status().isNoContent());
     }
 

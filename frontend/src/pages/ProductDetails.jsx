@@ -147,7 +147,7 @@ const ProductDetails = () => {
         <div className="app-container py-16 text-center">
           <p className="text-text-secondary">{error.message}</p>
           <Link
-            to="/"
+            to="/marketplace"
             className="mt-4 inline-block text-sm font-semibold text-primary hover:underline"
           >
             Back to browsing

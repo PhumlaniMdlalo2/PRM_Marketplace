@@ -45,7 +45,22 @@ public class VendorProfile {
 
     private String registrationNo;
 
-    /** Set by faculty through moderation; never by the seller. */
+    @JsonIgnore
+    private String payoutAccountHolder;
+
+    @JsonIgnore
+    private String payoutBankName;
+
+    @JsonIgnore
+    private String payoutAccountNumber;
+
+    @JsonIgnore
+    private String payoutBranchCode;
+
+    @JsonIgnore
+    private String payoutAccountType;
+
+    /** Set by admin through moderation; never by the seller. */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean verified;
 
@@ -75,6 +90,11 @@ public class VendorProfile {
         this.user = builder.user;
         this.businessName = builder.businessName;
         this.registrationNo = builder.registrationNo;
+        this.payoutAccountHolder = builder.payoutAccountHolder;
+        this.payoutBankName = builder.payoutBankName;
+        this.payoutAccountNumber = builder.payoutAccountNumber;
+        this.payoutBranchCode = builder.payoutBranchCode;
+        this.payoutAccountType = builder.payoutAccountType;
         this.verified = builder.verified;
         this.ratingAvg = builder.ratingAvg;
         this.ratingCount = builder.ratingCount;
@@ -113,6 +133,31 @@ public class VendorProfile {
 
     public String getRegistrationNo() {
         return registrationNo;
+    }
+
+    @JsonIgnore
+    public String getPayoutAccountHolder() {
+        return payoutAccountHolder;
+    }
+
+    @JsonIgnore
+    public String getPayoutBankName() {
+        return payoutBankName;
+    }
+
+    @JsonIgnore
+    public String getPayoutAccountNumber() {
+        return payoutAccountNumber;
+    }
+
+    @JsonIgnore
+    public String getPayoutBranchCode() {
+        return payoutBranchCode;
+    }
+
+    @JsonIgnore
+    public String getPayoutAccountType() {
+        return payoutAccountType;
     }
 
     public boolean isVerified() {
@@ -157,6 +202,11 @@ public class VendorProfile {
         private User user;
         private String businessName;
         private String registrationNo;
+        private String payoutAccountHolder;
+        private String payoutBankName;
+        private String payoutAccountNumber;
+        private String payoutBranchCode;
+        private String payoutAccountType;
 private boolean verified;
         private BigDecimal ratingAvg;
         private int ratingCount;
@@ -179,6 +229,16 @@ private boolean verified;
 
         public Builder setRegistrationNo(String registrationNo) {
             this.registrationNo = registrationNo;
+            return this;
+        }
+
+        public Builder setPayoutDetails(String accountHolder, String bankName, String accountNumber,
+                                        String branchCode, String accountType) {
+            this.payoutAccountHolder = accountHolder;
+            this.payoutBankName = bankName;
+            this.payoutAccountNumber = accountNumber;
+            this.payoutBranchCode = branchCode;
+            this.payoutAccountType = accountType;
             return this;
         }
 
@@ -207,6 +267,11 @@ private boolean verified;
             this.user = vendorProfile.user;
             this.businessName = vendorProfile.businessName;
             this.registrationNo = vendorProfile.registrationNo;
+            this.payoutAccountHolder = vendorProfile.payoutAccountHolder;
+            this.payoutBankName = vendorProfile.payoutBankName;
+            this.payoutAccountNumber = vendorProfile.payoutAccountNumber;
+            this.payoutBranchCode = vendorProfile.payoutBranchCode;
+            this.payoutAccountType = vendorProfile.payoutAccountType;
             this.verified = vendorProfile.verified;
             this.ratingAvg = vendorProfile.ratingAvg;
             // Copied rather than reset: this is the one path that must not drop it, since every

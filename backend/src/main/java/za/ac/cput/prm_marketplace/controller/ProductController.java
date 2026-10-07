@@ -62,6 +62,7 @@ public class ProductController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String city,
+            @RequestParam(required = false) String campus,
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(required = false) ProductCondition condition,
@@ -72,7 +73,7 @@ public class ProductController {
             @RequestParam(defaultValue = "desc") String direction) {
 
         ProductSearchCriteria criteria = new ProductSearchCriteria(
-                keyword, category, city, minPrice, maxPrice,
+                keyword, category, city, campus, minPrice, maxPrice,
                 condition, activeOnly, page, size, sortBy, direction);
 
         Page<Product> results = productService.search(criteria);

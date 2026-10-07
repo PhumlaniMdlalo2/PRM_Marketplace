@@ -13,17 +13,20 @@ const SignUp = () => {
   const navigate = useNavigate();
   const { signUp, isAuthenticated } = useAuth();
   const [formData, setFormData] = useState({
+    role: 'STUDENT',
     fullName: '',
     email: '',
     phoneNumber: '',
     password: '',
+    businessName: '',
+    registrationNo: '',
   });
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
+    if (isAuthenticated) navigate('/marketplace', { replace: true });
   }, [isAuthenticated, navigate]);
 
   const handleChange = (e) => {
@@ -39,10 +42,20 @@ const SignUp = () => {
     else if (formData.fullName.trim().split(' ').length < 2) next.name = 'Please enter your full name';
 
     if (!formData.email.trim()) next.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) next.email = 'Enter a valid email address';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) next.email = 'Enter a valid email address';
+    else if (formData.role === 'STUDENT') {
+      const domain = formData.email.trim().toLowerCase().split('@').pop();
+      if (!domain.endsWith('.ac.za') && !domain.endsWith('.edu.za')) {
+        next.email = 'Student emails must use an .ac.za or .edu.za domain';
+      }
+    }
 
     if (!formData.phoneNumber.trim()) next.phone = 'Phone number is required';
     else if (!/^[+\d][\d\s-]{8,}$/.test(formData.phoneNumber.trim())) next.phone = 'Enter a valid phone number';
+
+    if (formData.role === 'VENDOR' && !formData.businessName.trim()) {
+      next.businessName = 'Business name is required';
+    }
 
     if (!formData.password) next.password = 'Password is required';
     else if (formData.password.length < 8) next.password = 'Password must be at least 8 characters';
@@ -64,10 +77,13 @@ const SignUp = () => {
       // server's fieldErrors come back keyed the same way, so they land on the right input without
       // a translation table.
       await signUp({
+        role: formData.role,
         name: formData.fullName.trim(),
         email: formData.email.trim(),
         phone: formData.phoneNumber.trim(),
         password: formData.password,
+        businessName: formData.role === 'VENDOR' ? formData.businessName.trim() : undefined,
+        registrationNo: formData.role === 'VENDOR' ? formData.registrationNo.trim() : undefined,
       });
       // No session is stored here. The account is unverified and the server refuses to issue a
       // usable token for one, so the next step is the emailed code.
@@ -105,6 +121,30 @@ const SignUp = () => {
           </div>
         )}
 
+        <div>
+          <label htmlFor="accountType" className="mb-1.5 block text-sm font-medium text-text-primary">
+            I am signing up as
+          </label>
+          <select
+            id="accountType"
+            name="role"
+            value={formData.role}
+            onChange={handleChange}
+            className="w-full rounded-xl border border-border bg-white px-4 py-3 text-text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="STUDENT">Student</option>
+            <option value="VENDOR">Vendor</option>
+            <option value="RESIDENT">Community member</option>
+          </select>
+          <p className="mt-1 text-xs text-text-muted">
+            {formData.role === 'STUDENT'
+              ? 'Use your .ac.za or .edu.za student email. You can apply to sell later from Settings.'
+              : formData.role === 'VENDOR'
+                ? 'Vendor accounts need admin approval before they can publish listings.'
+                : 'Community members can browse and buy using any valid email address.'}
+          </p>
+        </div>
+
         <Input
           label="Full Name"
           name="fullName"
@@ -116,15 +156,39 @@ const SignUp = () => {
         />
 
         <Input
-          label="University Email"
+          label="Email"
           type="email"
           name="email"
-          placeholder="e.g., you@cput.ac.za"
+          placeholder="you@example.com"
           error={errors.email}
           value={formData.email}
           onChange={handleChange}
           autoComplete="email"
         />
+
+        {formData.role === 'VENDOR' && (
+          <>
+            <Input
+              label="Business or store name"
+              name="businessName"
+              placeholder="Enter your business name"
+              error={errors.businessName}
+              value={formData.businessName}
+              onChange={handleChange}
+              maxLength={120}
+              autoComplete="organization"
+            />
+
+            <Input
+              label="Business registration number"
+              name="registrationNo"
+              placeholder="Optional"
+              value={formData.registrationNo}
+              onChange={handleChange}
+              maxLength={120}
+            />
+          </>
+        )}
 
         <Input
           label="Phone Number"

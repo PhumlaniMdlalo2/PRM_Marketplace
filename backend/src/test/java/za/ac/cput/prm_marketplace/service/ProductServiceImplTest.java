@@ -63,6 +63,7 @@ class ProductServiceImplTest {
         sellerProfile = new VendorProfile.Builder()
                 .setId(vendorId)
                 .setBusinessName("Phumlani Devices")
+                .setVerified(true)
                 .build();
 
         laptop = ProductFactory.createProduct("Laptop", "15 inch",
@@ -120,6 +121,20 @@ class ProductServiceImplTest {
     }
 
     @Test
+    @DisplayName("create refuses listings until admin approves the seller profile")
+    void create_unverifiedSeller_throwsForbidden() {
+        VendorProfile pendingProfile = new VendorProfile.Builder()
+                .setId(vendorId)
+                .setBusinessName("Pending Store")
+                .build();
+        when(vendorProfileRepository.findByUserId(sellerId)).thenReturn(Optional.of(pendingProfile));
+
+        assertThrows(za.ac.cput.prm_marketplace.exception.ForbiddenException.class,
+                () -> productService.create(laptop, sellerId));
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
     @DisplayName("create starts the listing active")
     void create_startsActive() {
         givenSellerHasProfile();
@@ -173,6 +188,19 @@ class ProductServiceImplTest {
         when(productRepository.findById(id)).thenReturn(Optional.of(ownedLaptop));
 
         assertSame(ownedLaptop, productService.read(id));
+    }
+
+    @Test
+    @DisplayName("read hides a listing whose seller approval was withdrawn")
+    void read_unverifiedSeller_returnsNull() {
+        VendorProfile pendingProfile = new VendorProfile.Builder()
+                .setId(vendorId)
+                .setBusinessName("Pending Store")
+                .build();
+        Product pendingProduct = Product.builder().copy(ownedLaptop).vendor(pendingProfile).build();
+        when(productRepository.findById(id)).thenReturn(Optional.of(pendingProduct));
+
+        assertNull(productService.read(id));
     }
 
     @Test
@@ -323,6 +351,21 @@ class ProductServiceImplTest {
     }
 
     @Test
+    @DisplayName("reactivate refuses to republish a listing until seller approval")
+    void reactivate_unverifiedSeller_throwsForbidden() {
+        VendorProfile pendingProfile = new VendorProfile.Builder()
+                .setId(vendorId)
+                .setBusinessName("Pending Store")
+                .build();
+        Product retired = Product.builder().copy(ownedLaptop).vendor(pendingProfile).active(false).build();
+        when(productRepository.findByIdAndVendorUserId(id, sellerId)).thenReturn(Optional.of(retired));
+
+        assertThrows(za.ac.cput.prm_marketplace.exception.ForbiddenException.class,
+                () -> productService.reactivate(id, sellerId));
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
     @DisplayName("retiring somebody else's listing is reported as not found and saves nothing")
     void retire_rejectsAnotherSellersListing() {
         when(productRepository.findByIdAndVendorUserId(id, sellerId)).thenReturn(Optional.empty());
@@ -374,7 +417,7 @@ class ProductServiceImplTest {
     @Test
     @DisplayName("getAll returns live listings only, so a retired item leaves the browse grid")
     void getAll_returnsLiveProductsOnly() {
-        when(productRepository.findByActiveTrue()).thenReturn(List.of(laptop, phone));
+        when(productRepository.findByActiveTrueAndVendorVerifiedTrue()).thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getAll();
 
@@ -386,7 +429,7 @@ class ProductServiceImplTest {
 
     @Test
     void getAll_noProducts_returnsEmptyList() {
-        when(productRepository.findByActiveTrue()).thenReturn(List.of());
+        when(productRepository.findByActiveTrueAndVendorVerifiedTrue()).thenReturn(List.of());
 
         assertTrue(productService.getAll().isEmpty());
     }
@@ -396,12 +439,13 @@ class ProductServiceImplTest {
     @Test
     @DisplayName("getByVendor returns live listings only")
     void getByVendor_returnsVendorsProducts() {
-        when(productRepository.findByVendorIdAndActiveTrue(vendorId)).thenReturn(List.of(laptop, phone));
+        when(productRepository.findByVendorIdAndActiveTrueAndVendorVerifiedTrue(vendorId))
+                .thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getByVendor(vendorId);
 
         assertEquals(2, result.size());
-        verify(productRepository).findByVendorIdAndActiveTrue(vendorId);
+        verify(productRepository).findByVendorIdAndActiveTrueAndVendorVerifiedTrue(vendorId);
         verify(productRepository, never()).findByVendorId(vendorId);
     }
 
@@ -414,12 +458,13 @@ class ProductServiceImplTest {
     @Test
     @DisplayName("getByCategory returns live listings only")
     void getByCategory_returnsMatchingProducts() {
-        when(productRepository.findByActiveTrueAndCategory("Electronics")).thenReturn(List.of(laptop, phone));
+        when(productRepository.findByActiveTrueAndCategoryAndVendorVerifiedTrue("Electronics"))
+                .thenReturn(List.of(laptop, phone));
 
         List<Product> result = productService.getByCategory("Electronics");
 
         assertEquals(2, result.size());
-        verify(productRepository).findByActiveTrueAndCategory("Electronics");
+        verify(productRepository).findByActiveTrueAndCategoryAndVendorVerifiedTrue("Electronics");
         verify(productRepository, never()).findByCategory("Electronics");
     }
 
@@ -432,7 +477,7 @@ class ProductServiceImplTest {
     // search
 
     private ProductSearchCriteria criteria(int page, int size, String sortBy, String direction) {
-        return new ProductSearchCriteria(null, null, null, null, null, null, null,
+        return new ProductSearchCriteria(null, null, null, null, null, null, null, null,
                 page, size, sortBy, direction);
     }
 
@@ -530,7 +575,7 @@ class ProductServiceImplTest {
     @Test
     void search_rejectsInvertedPriceRange() {
         assertThrows(IllegalArgumentException.class, () -> new ProductSearchCriteria(
-                null, null, null, new BigDecimal("100"), new BigDecimal("10"),
+                null, null, null, null, new BigDecimal("100"), new BigDecimal("10"),
                 null, null, 0, 20, "name", "asc"));
     }
 

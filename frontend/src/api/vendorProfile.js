@@ -49,12 +49,12 @@ export const getMyVendorProfile = async () => {
 };
 
 /**
- * Creates the caller's own seller profile. Only a VENDOR account may hold one, and only one per
- * account, so a student or a second attempt both come back 400.
+ * Creates the caller's own seller profile. Verified STUDENT and VENDOR accounts may hold one, and
+ * only one per account.
  *
  * <p>Only the two editable fields are sent: verified and ratingAvg are the server's to set.
  *
- * @throws {Object} the normalised client error, with `status` 400 when the role is not VENDOR or a
+ * @throws {Object} the normalised client error, with `status` 400 when the role is not eligible or a
  *   profile already exists
  */
 export const createVendorProfile = async (profile) => {
@@ -65,5 +65,23 @@ export const createVendorProfile = async (profile) => {
 /** Updates the caller's own seller profile. Somebody else's is reported as not found. */
 export const updateVendorProfile = async (id, profile) => {
   const response = await api.put(`/vendor-profiles/${id}`, profile);
+  return response.data;
+};
+
+export const getMyPayoutDetails = async () => {
+  const response = await api.get('/vendor-profiles/me/payout-details');
+  return response.data;
+};
+
+export const updateMyPayoutDetails = async (details) => {
+  const response = await api.put('/vendor-profiles/me/payout-details', details);
+  return response.data;
+};
+
+/** Grants or withdraws admin approval for a seller profile. */
+export const setVendorVerification = async (id, verified) => {
+  const response = await api.patch(`/vendor-profiles/${id}/verification`, null, {
+    params: { verified },
+  });
   return response.data;
 };

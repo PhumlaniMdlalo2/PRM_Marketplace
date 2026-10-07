@@ -17,7 +17,7 @@ const SearchBar = ({
         value={value}
         onChange={onChange}
         aria-label="Search"
-        className="w-full pl-12 pr-4 py-3.5 bg-lavender rounded-full text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/40 focus:bg-white transition-all duration-200 hover:bg-lavender-dark"
+        className="w-full pl-12 pr-4 py-3.5 bg-lavender rounded-xl text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 focus:bg-white transition-all duration-200 hover:bg-lavender-dark"
       />
     </div>
   );

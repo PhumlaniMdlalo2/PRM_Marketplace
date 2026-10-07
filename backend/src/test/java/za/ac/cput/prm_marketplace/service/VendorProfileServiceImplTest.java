@@ -3,6 +3,7 @@ package za.ac.cput.prm_marketplace.service;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.domain.User;
 import za.ac.cput.prm_marketplace.domain.VendorProfile;
+import za.ac.cput.prm_marketplace.dto.SellerPayoutDetails;
 import za.ac.cput.prm_marketplace.repository.UserRepository;
 import za.ac.cput.prm_marketplace.repository.VendorProfileRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -152,9 +153,48 @@ class VendorProfileServiceImplTest {
     @Test
     @DisplayName("create refuses an account that is not a vendor")
     void createNonVendorIsRefused() {
-        assertThat(vendorProfileService.create(submitted(), sellerId, Role.STUDENT)).isNull();
+        assertThat(vendorProfileService.create(submitted(), sellerId, Role.RESIDENT)).isNull();
 
         verifyNoInteractions(vendorProfileRepository, userRepository);
+    }
+
+    @Test
+    @DisplayName("create allows a student to apply for a seller profile")
+    void createStudentSellerApplicationIsAllowed() {
+        when(userRepository.findById(sellerId)).thenReturn(Optional.of(seller));
+        when(vendorProfileRepository.existsByUserId(sellerId)).thenReturn(false);
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        VendorProfile result = vendorProfileService.create(submitted(), sellerId, Role.STUDENT);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("seller payout details update only the caller's profile")
+    void updateMyPayoutDetails_savesPrivateDetails() {
+        VendorProfile existing = stored();
+        when(vendorProfileRepository.findByUserId(sellerId)).thenReturn(Optional.of(existing));
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        SellerPayoutDetails result = vendorProfileService.updateMyPayoutDetails(sellerId,
+                new SellerPayoutDetails(" Seller Name ", " Example Bank ", "12345678",
+                        "123456", "CURRENT"));
+
+        assertThat(result.accountHolder()).isEqualTo("Seller Name");
+        assertThat(result.bankName()).isEqualTo("Example Bank");
+        assertThat(result.accountNumber()).isEqualTo("12345678");
+    }
+
+    @Test
+    @DisplayName("invalid account digits are not stored")
+    void updateMyPayoutDetails_rejectsMalformedAccountNumber() {
+        assertThat(vendorProfileService.updateMyPayoutDetails(sellerId,
+                new SellerPayoutDetails("Seller", "Bank", "not-an-account", "123456", "CURRENT")))
+                .isNull();
+        verifyNoInteractions(vendorProfileRepository);
     }
 
     @Test
@@ -269,6 +309,21 @@ class VendorProfileServiceImplTest {
 
         assertThat(result.getBusinessName()).isEqualTo("Acme Repairs and Parts");
         assertThat(result.getRegistrationNo()).isEqualTo("REG-2");
+        assertThat(result.isVerified()).isFalse();
+    }
+
+    @Test
+    @DisplayName("update keeps approval when seller details have not changed")
+    void updateUnchangedDetailsKeepApproval() {
+        UUID id = UUID.randomUUID();
+        VendorProfile existing = stored();
+        when(vendorProfileRepository.findByIdAndUserId(id, sellerId)).thenReturn(Optional.of(existing));
+        when(vendorProfileRepository.save(any(VendorProfile.class)))
+                .thenAnswer(call -> call.getArgument(0));
+
+        VendorProfile result = vendorProfileService.update(id, submitted(), sellerId);
+
+        assertThat(result.isVerified()).isTrue();
     }
 
     @Test
@@ -336,8 +391,8 @@ class VendorProfileServiceImplTest {
     // verify
 
     @Test
-    @DisplayName("verify grants the badge for faculty")
-    void verifyGrantsTheBadgeForFaculty() {
+    @DisplayName("verify grants the badge for admin")
+    void verifyGrantsTheBadgeForAdmin() {
         UUID id = UUID.randomUUID();
         VendorProfile unverified = new VendorProfile.Builder()
                 .setId(id)
@@ -349,7 +404,7 @@ class VendorProfileServiceImplTest {
         when(vendorProfileRepository.save(any(VendorProfile.class)))
                 .thenAnswer(call -> call.getArgument(0));
 
-        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.ADMIN);
 
         // The flag could not be set by any other route, so before this method existed the badge the
         // listing page renders was permanently unreachable for everyone.
@@ -357,7 +412,7 @@ class VendorProfileServiceImplTest {
     }
 
     @Test
-    @DisplayName("verify withdraws the badge when faculty say so")
+    @DisplayName("verify withdraws the badge when admin say so")
     void verifyWithdrawsTheBadge() {
         UUID id = UUID.randomUUID();
         when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(stored()));
@@ -365,7 +420,7 @@ class VendorProfileServiceImplTest {
                 .thenAnswer(call -> call.getArgument(0));
 
         // Withdrawal has to work, or a revoked seller stays marked trusted on every listing forever.
-        assertThat(vendorProfileService.verify(id, false, UUID.randomUUID(), Role.FACULTY).isVerified())
+        assertThat(vendorProfileService.verify(id, false, UUID.randomUUID(), Role.ADMIN).isVerified())
                 .isFalse();
     }
 
@@ -386,7 +441,7 @@ class VendorProfileServiceImplTest {
         when(vendorProfileRepository.save(any(VendorProfile.class)))
                 .thenAnswer(call -> call.getArgument(0));
 
-        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.ADMIN);
 
         // Verification and reputation are separate signals. Rebuilding the row here without copying
         // the rating would erase a seller's score for everyone who has reviewed them.
@@ -420,7 +475,7 @@ class VendorProfileServiceImplTest {
         UUID id = UUID.randomUUID();
         when(vendorProfileRepository.findById(id)).thenReturn(Optional.empty());
 
-        assertThat(vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY)).isNull();
+        assertThat(vendorProfileService.verify(id, true, UUID.randomUUID(), Role.ADMIN)).isNull();
     }
 
     @Test
@@ -429,7 +484,7 @@ class VendorProfileServiceImplTest {
         UUID id = UUID.randomUUID();
         when(vendorProfileRepository.findById(id)).thenReturn(Optional.of(stored()));
 
-        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.FACULTY);
+        VendorProfile result = vendorProfileService.verify(id, true, UUID.randomUUID(), Role.ADMIN);
 
         assertThat(result.isVerified()).isTrue();
         // A repeat call is idempotent rather than a pointless write.
@@ -439,7 +494,7 @@ class VendorProfileServiceImplTest {
     @Test
     @DisplayName("verify ignores a null id")
     void verifyIgnoresANullId() {
-        assertThat(vendorProfileService.verify(null, true, UUID.randomUUID(), Role.FACULTY)).isNull();
+        assertThat(vendorProfileService.verify(null, true, UUID.randomUUID(), Role.ADMIN)).isNull();
 
         verifyNoInteractions(vendorProfileRepository);
     }

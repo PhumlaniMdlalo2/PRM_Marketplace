@@ -27,9 +27,12 @@ public class User {
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
-    private Role role; // enum: STUDENT, FACULTY, VENDOR, RESIDENT
+    private Role role; // enum: STUDENT, ADMIN, VENDOR, RESIDENT
 
     private String phone;
+
+    @Column(length = 160)
+    private String campus;
 
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -55,6 +58,7 @@ public class User {
         this.passwordHash = builder.passwordHash;
         this.role = builder.role;
         this.phone = builder.phone;
+        this.campus = builder.campus;
         this.createdAt = builder.createdAt;
         this.verified = builder.verified;
         this.avatarUrl = builder.avatarUrl;
@@ -80,7 +84,7 @@ public class User {
 
     /**
      * Server-owned. The role is decided by the registration and approval flow, so a request body
-     * that carries "role" must not be able to grant itself a faculty or vendor account.
+     * that carries "role" must not be able to grant itself an admin or vendor account.
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public Role getRole() {
@@ -89,6 +93,10 @@ public class User {
 
     public String getPhone() {
         return phone;
+    }
+
+    public String getCampus() {
+        return campus;
     }
 
     /** Server-owned, and {@code updatable = false}, so it must not be settable from a body either. */
@@ -181,8 +189,9 @@ public VendorProfile getVendorProfile() {
         private String name;
         private String email;
         private String passwordHash;
-        private Role role; // enum: STUDENT, FACULTY, VENDOR, RESIDENT
+        private Role role; // enum: STUDENT, ADMIN, VENDOR, RESIDENT
         private String phone;
+        private String campus;
         private LocalDateTime createdAt;
         private boolean verified;
         private String avatarUrl;
@@ -218,6 +227,11 @@ public VendorProfile getVendorProfile() {
             return this;
         }
 
+        public Builder setCampus(String campus) {
+            this.campus = campus;
+            return this;
+        }
+
         public Builder setCreatedAt(LocalDateTime createdAt) {
             this.createdAt = createdAt;
             return this;
@@ -245,6 +259,7 @@ public VendorProfile getVendorProfile() {
             this.passwordHash = user.passwordHash;
             this.role = user.role;
             this.phone = user.phone;
+            this.campus = user.campus;
             this.createdAt = user.createdAt;
             this.verified = user.verified;
             this.avatarUrl = user.avatarUrl;

@@ -17,6 +17,8 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    private static final int MIN_SECRET_BYTES = 32;
+
     public static final String CLAIM_USER_ID = "uid";
     public static final String CLAIM_ROLE = "role";
     public static final String CLAIM_NAME = "name";
@@ -26,6 +28,14 @@ public class JwtService {
 
     public JwtService(@Value("${app.jwt.secret}") String secret,
                       @Value("${app.jwt.expiration-ms:86400000}") long expirationMillis) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("app.jwt.secret is not set. Provide a secret of at least "
+                    + MIN_SECRET_BYTES + " bytes via JWT_SECRET.");
+        }
+        if (secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException("app.jwt.secret must be at least " + MIN_SECRET_BYTES
+                    + " bytes so it is valid for HS256.");
+        }
         this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMillis = expirationMillis;
     }

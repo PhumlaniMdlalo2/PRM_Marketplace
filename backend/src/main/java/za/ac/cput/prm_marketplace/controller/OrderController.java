@@ -7,6 +7,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import za.ac.cput.prm_marketplace.domain.Order;
 import za.ac.cput.prm_marketplace.domain.OrderStatus;
+import za.ac.cput.prm_marketplace.domain.FulfillmentMethod;
 import za.ac.cput.prm_marketplace.domain.PaymentMethod;
 import za.ac.cput.prm_marketplace.domain.Role;
 import za.ac.cput.prm_marketplace.exception.UnauthorizedException;
@@ -44,8 +45,9 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<Order> create(Authentication caller,
                                         @RequestParam(required = false) UUID shippingAddressId,
-                                        @RequestParam(required = false) PaymentMethod paymentMethod) {
-        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod);
+                                        @RequestParam(required = false) PaymentMethod paymentMethod,
+                                        @RequestParam(required = false) FulfillmentMethod fulfillmentMethod) {
+        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod, fulfillmentMethod);
         if (placed == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -62,8 +64,9 @@ public class OrderController {
     @PostMapping("/checkout")
     public ResponseEntity<Order> checkout(Authentication caller,
                                           @RequestParam(required = false) UUID shippingAddressId,
-                                          @RequestParam(required = false) PaymentMethod paymentMethod) {
-        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod);
+                                          @RequestParam(required = false) PaymentMethod paymentMethod,
+                                          @RequestParam(required = false) FulfillmentMethod fulfillmentMethod) {
+        Order placed = orderService.checkout(callerId(caller), shippingAddressId, paymentMethod, fulfillmentMethod);
         if (placed == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -109,6 +112,11 @@ public class OrderController {
     @GetMapping
     public ResponseEntity<List<Order>> getAll(Authentication caller) {
         return ResponseEntity.ok(orderService.getAll(callerId(caller)));
+    }
+
+    @GetMapping("/seller")
+    public ResponseEntity<List<Order>> getSellerOrders(Authentication caller) {
+        return ResponseEntity.ok(orderService.getSellerOrders(callerId(caller), callerRole(caller)));
     }
 
     /**

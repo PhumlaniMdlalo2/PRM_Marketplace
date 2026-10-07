@@ -23,8 +23,8 @@ export const createReport = async (report) => {
 /**
  * Every report, for moderation.
  *
- * The route is open to any signed-in caller and the service decides what comes back: a faculty
- * account gets the queue, and anyone else gets an empty list rather than a refusal. Reading that
+ * The route is open to any signed-in caller and the service decides what comes back: an
+ * admin account gets the queue, and anyone else gets an empty list rather than a refusal. Reading that
  * answer as "there is nothing to do" is correct for both, which is why there is no role check on
  * this side of it.
  *
@@ -43,7 +43,7 @@ export const listReportsForModeration = async () => {
  *
  * @param {string} id  the report being decided
  * @param {object} decision  `status` (OPEN | UNDER_REVIEW | RESOLVED) and optional `notes`
- * @throws {Object} the normalised client error, with `status` 404 when the caller is not faculty
+ * @throws {Object} the normalised client error, with `status` 404 when the caller is not admin
  *   or the report does not exist — the route answers 404 for both
  */
 export const resolveReport = async (id, { status, notes } = {}) => {
