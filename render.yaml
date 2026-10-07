@@ -1,7 +1,7 @@
 services:
   - type: web
     name: prm-marketplace-backend
-    env: java
+    runtime: java
     rootDir: backend
     buildCommand: ./mvnw clean install -DskipTests
     startCommand: ./mvnw spring-boot:run
